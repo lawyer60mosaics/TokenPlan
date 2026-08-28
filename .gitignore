@@ -1,0 +1,32 @@
+# Dependencies and generated builds
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+
+# Local credentials and encrypted profile files (including backups)
+.env
+.env.*
+!.env.example
+*.dat
+*.dat.*
+*.pem
+*.key
+*.pfx
+credentials*.json
+profiles*.json
+
+# Test captures may contain private account balances or credentials
+tests/*.png
+tests/*.jpg
+tests/*.jpeg
+
+# Local agent/editor state and temporary files
+.claude/
+.codex/
+.idea/
+*.log
+*.tmp
+*.bak
+Thumbs.db
+.DS_Store
