@@ -11,6 +11,9 @@
 - 账号和密码存入 Keychain，访问级别为 `WhenUnlockedThisDeviceOnly`。
 - 解密后的本地套餐文件使用 iOS Complete File Protection 和原子写入。
 - 使用 revision + `If-Match` 阻止离线设备静默覆盖较新的云端数据。
+- 提供桌面小、中、大组件，以及锁屏圆形、矩形和行内组件。
+- 支持锁屏实时活动和灵动岛的展开、紧凑、最小状态。
+- App Group 共享快照仅包含名称、供应商和启用状态，不包含套餐凭据。
 
 ## 在 macOS 生成工程
 
@@ -22,6 +25,7 @@ open TokenPlan.xcodeproj
 ```
 
 在 Xcode 的 Signing & Capabilities 中选择自己的 Team。Bundle ID 默认是 `com.xuwenxu.tokenplan`，如已被占用需同时修改 `project.yml`。
+签名时还需要为主应用和小组件扩展启用 App Group `group.com.xuwenxu.tokenplan`；如修改 Bundle ID，也应一并修改 App Group 和两个 entitlements 文件。
 
 ## 验证
 

@@ -33,6 +33,21 @@ struct SyncSettingsView: View {
                             .disabled(model.isBusy)
                     }
                 }
+                Section("锁屏与灵动岛") {
+                    LabeledContent("实时活动", value: model.isLiveActivityActive ? "运行中" : "未启动")
+                    if model.isLiveActivityActive {
+                        Button("结束灵动岛实时活动", role: .destructive) {
+                            Task { await model.endLiveActivity() }
+                        }
+                    } else {
+                        Button("启动灵动岛实时活动") {
+                            Task { await model.startLiveActivity() }
+                        }
+                    }
+                    Text("桌面和锁屏小组件可从系统的小组件库添加。灵动岛仅在支持的 iPhone 上显示，其他设备会显示锁屏实时活动。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
                 if model.isBusy {
                     Section { ProgressView("同步中…") }
                 }

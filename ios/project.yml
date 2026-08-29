@@ -10,16 +10,19 @@ packages:
 settings:
   base:
     SWIFT_VERSION: 5.10
-    CURRENT_PROJECT_VERSION: 2
-    MARKETING_VERSION: 0.2.0
+    CURRENT_PROJECT_VERSION: 3
+    MARKETING_VERSION: 0.3.0
 targets:
   TokenPlan:
     type: application
     platform: iOS
     sources:
       - path: TokenPlan
+      - path: Shared
     dependencies:
       - package: Sodium
+      - target: TokenPlanWidgets
+        embed: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.xuwenxu.tokenplan
@@ -30,10 +33,28 @@ targets:
         INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait
+        INFOPLIST_KEY_NSSupportsLiveActivities: YES
+        CODE_SIGN_ENTITLEMENTS: TokenPlan/TokenPlan.entitlements
         CODE_SIGN_STYLE: Automatic
     scheme:
       testTargets:
         - TokenPlanTests
+  TokenPlanWidgets:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "16.1"
+    sources:
+      - path: TokenPlanWidgets
+      - path: Shared
+    info:
+      path: TokenPlanWidgets/Info.plist
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.xuwenxu.tokenplan.widgets
+        CODE_SIGN_ENTITLEMENTS: TokenPlanWidgets/TokenPlanWidgets.entitlements
+        CODE_SIGN_STYLE: Automatic
+        APPLICATION_EXTENSION_API_ONLY: YES
+        SKIP_INSTALL: YES
   TokenPlanTests:
     type: bundle.unit-test
     platform: iOS
