@@ -22,6 +22,12 @@ const copy = {
     missingTeam: '智谱团队版还需要组织 ID 和项目 ID', invalidZenmux: '请填写 zenmux.ai / zenmux.com 的完整 HTTPS 用量接口地址',
     unsupported: '不支持的套餐类型', nameRequired: '请填写配置名称', loadFailed: '配置读取失败，已禁止覆盖原文件',
     saveFailed: '保存失败：', autostartFailed: '套餐已保存，但开机自启动设置失败：', amount: '已用 / 上限',
+    cloudSync: '云同步', syncEndpoint: '服务器地址', syncToken: '同步令牌', recoveryKey: '恢复密钥',
+    configureSync: '配置云同步', uploadCloud: '上传', downloadCloud: '下载', disableSync: '停用',
+    syncReady: '已配置，云端版本', syncOff: '未配置', tokenRequired: '请填写同步令牌',
+    recoveryWarning: '恢复密钥用于其他设备解密，服务器无法找回。请离线保存。',
+    syncConfigured: '云同步配置成功', uploadSuccess: '已上传加密配置', downloadSuccess: '已下载并替换本地配置',
+    localSavedSyncFailed: '本地已保存，云同步失败：', syncFailed: '云同步失败：',
     hint: '每 60 秒自动查询所有启用的配置。', dragFailed: '窗口拖动失败：',
     totalBalance: '总余额', grantedBalance: '赠送余额', toppedUpBalance: '充值余额', balanceAccount: '账户余额',
     available: '● 余额可用', insufficient: '● 余额不足，暂不可调用 API',
@@ -38,6 +44,12 @@ const copy = {
     missingTeam: 'Zhipu Team also needs organization and project IDs', invalidZenmux: 'Enter a full HTTPS usage URL on zenmux.ai / zenmux.com',
     unsupported: 'Unsupported provider', nameRequired: 'Enter a profile name', loadFailed: 'Cannot read profiles; original file protected from overwrite',
     saveFailed: 'Save failed: ', autostartFailed: 'Plans saved, but startup setting failed: ', amount: 'Used / Limit',
+    cloudSync: 'Cloud sync', syncEndpoint: 'Server URL', syncToken: 'Sync token', recoveryKey: 'Recovery key',
+    configureSync: 'Configure cloud sync', uploadCloud: 'Upload', downloadCloud: 'Download', disableSync: 'Disable',
+    syncReady: 'Configured, cloud revision', syncOff: 'Not configured', tokenRequired: 'Enter the sync token',
+    recoveryWarning: 'The recovery key decrypts data on other devices and cannot be recovered by the server. Store it offline.',
+    syncConfigured: 'Cloud sync configured', uploadSuccess: 'Encrypted profiles uploaded', downloadSuccess: 'Cloud profiles downloaded and applied locally',
+    localSavedSyncFailed: 'Saved locally, but cloud sync failed: ', syncFailed: 'Cloud sync failed: ',
     hint: 'Every enabled profile refreshes automatically every 60 seconds.', dragFailed: 'Window drag failed: ',
     totalBalance: 'Total balance', grantedBalance: 'Granted balance', toppedUpBalance: 'Topped-up balance', balanceAccount: 'Account balance',
     available: '● Balance available', insufficient: '● Insufficient balance for API calls',
@@ -61,6 +73,8 @@ const showSettings = ref(false), showError = ref(false), dragError = ref(''), lo
 const showNotices = ref(false), noticesButton = ref(null), noticesScroll = ref(null), noticesBack = ref(null);
 const drafts = ref([]), draftId = ref(''), saveError = ref(''), saving = ref(false), confirmDelete = ref('');
 const autostart = ref(false);
+const syncState = ref(null), syncEndpoint = ref('https://47.102.119.11'), syncToken = ref(''), syncRecoveryKey = ref('');
+const syncMessage = ref(''), syncing = ref(false);
 const draft = computed(() => drafts.value.find(p => p.id === draftId.value));
 const draftMeta = computed(() => providerInfo(draft.value?.provider));
 let timer, unlisten;
@@ -109,6 +123,71 @@ function settings(add = false) {
   if (add || !drafts.value.length) addDraft();
   showSettings.value = true;
   invoke('get_autostart').then(value => { autostart.value = value; }).catch(error => { saveError.value = String(error); });
+  loadSyncState();
+}
+async function loadSyncState() {
+  try {
+    syncState.value = await invoke('get_sync_state');
+    if (syncState.value?.endpoint) syncEndpoint.value = syncState.value.endpoint;
+  } catch (error) { syncMessage.value = tr('syncFailed') + String(error); }
+}
+async function configureCloudSync() {
+  if (syncing.value) return;
+  if (!syncToken.value.trim()) { syncMessage.value = tr('tokenRequired'); return; }
+  syncing.value = true;
+  syncMessage.value = '';
+  try {
+    const result = await invoke('configure_sync', {
+      endpoint: syncEndpoint.value,
+      token: syncToken.value,
+      recoveryKey: syncRecoveryKey.value.trim() || null,
+    });
+    syncState.value = result.state;
+    syncRecoveryKey.value = result.recoveryKey;
+    syncToken.value = '';
+    syncMessage.value = tr('syncConfigured');
+  } catch (error) { syncMessage.value = tr('syncFailed') + String(error); }
+  finally { syncing.value = false; }
+}
+async function uploadCloud() {
+  if (syncing.value) return;
+  syncing.value = true;
+  syncMessage.value = '';
+  try {
+    syncState.value = await invoke('push_sync', { profiles: profiles.value });
+    syncMessage.value = tr('uploadSuccess');
+  } catch (error) { syncMessage.value = tr('syncFailed') + String(error); }
+  finally { syncing.value = false; }
+}
+async function downloadCloud() {
+  if (syncing.value) return;
+  syncing.value = true;
+  syncMessage.value = '';
+  try {
+    const result = await invoke('pull_sync');
+    profiles.value = result.profiles.map(migrateProfile);
+    drafts.value = JSON.parse(JSON.stringify(profiles.value));
+    if (!profiles.value.some(p => p.id === selected.value)) selected.value = profiles.value[0]?.id || '';
+    draftId.value = selected.value;
+    rememberSelection();
+    tracker.retain(profiles.value.map(p => p.id));
+    refreshAll();
+    syncState.value = result.state;
+    syncMessage.value = tr('downloadSuccess');
+  } catch (error) { syncMessage.value = tr('syncFailed') + String(error); }
+  finally { syncing.value = false; }
+}
+async function disableCloudSync() {
+  if (syncing.value) return;
+  syncing.value = true;
+  try {
+    await invoke('disable_sync');
+    syncState.value = null;
+    syncToken.value = '';
+    syncRecoveryKey.value = '';
+    syncMessage.value = tr('syncOff');
+  } catch (error) { syncMessage.value = tr('syncFailed') + String(error); }
+  finally { syncing.value = false; }
 }
 async function openNotices() {
   showNotices.value = true;
@@ -163,6 +242,10 @@ async function saveSettings() {
     refreshAll();
     try { await invoke('set_autostart', { enabled: autostart.value }); }
     catch (error) { saveError.value = tr('autostartFailed') + String(error); return; }
+    if (syncState.value?.enabled) {
+      try { syncState.value = await invoke('push_sync', { profiles: next }); }
+      catch (error) { saveError.value = tr('localSavedSyncFailed') + String(error); return; }
+    }
     showSettings.value = false;
   } catch (error) { saveError.value = tr('saveFailed') + String(error); }
   finally { saving.value = false; }
@@ -181,6 +264,7 @@ onMounted(async () => {
   document.documentElement.lang = lang.value === 'zh' ? 'zh-CN' : 'en';
   try {
     profiles.value = (await invoke('load_profiles')).map(migrateProfile);
+    await loadSyncState();
     if (!profiles.value.some(p => p.id === selected.value)) selected.value = profiles.value[0]?.id || '';
     refreshAll();
     timer = setInterval(refreshAll, 60000);
@@ -264,6 +348,20 @@ onUnmounted(() => { disposed = true; clearInterval(timer); unlisten?.(); });
           <p v-else>{{ tr('noProfiles') }}</p>
           <label class="switch-row"><input v-model="autostart" type="checkbox" :disabled="saving" />{{ tr('autostart') }}</label>
           <p class="hint">{{ tr('hint') }} {{ tr('saved') }}</p>
+          <section class="sync-settings" :aria-label="tr('cloudSync')">
+            <div class="sync-heading"><strong>{{ tr('cloudSync') }}</strong><span>{{ syncState?.enabled ? tr('syncReady') + ' ' + syncState.revision : tr('syncOff') }}</span></div>
+            <label>{{ tr('syncEndpoint') }}<input v-model="syncEndpoint" type="url" inputmode="url" autocomplete="off" spellcheck="false" :disabled="syncing" /></label>
+            <label>{{ tr('syncToken') }}<input v-model="syncToken" type="password" autocomplete="off" spellcheck="false" :disabled="syncing" /></label>
+            <label>{{ tr('recoveryKey') }}<input v-model="syncRecoveryKey" type="password" autocomplete="off" spellcheck="false" :disabled="syncing" /></label>
+            <p class="hint">{{ tr('recoveryWarning') }}</p>
+            <div class="sync-actions">
+              <button type="button" @click="configureCloudSync" :disabled="syncing">{{ tr('configureSync') }}</button>
+              <button v-if="syncState?.enabled" type="button" @click="uploadCloud" :disabled="syncing">{{ tr('uploadCloud') }}</button>
+              <button v-if="syncState?.enabled" type="button" @click="downloadCloud" :disabled="syncing">{{ tr('downloadCloud') }}</button>
+              <button v-if="syncState?.enabled" type="button" class="delete" @click="disableCloudSync" :disabled="syncing">{{ tr('disableSync') }}</button>
+            </div>
+            <p v-if="syncMessage" class="sync-message" aria-live="polite">{{ syncMessage }}</p>
+          </section>
         </div>
         <p v-if="saveError" class="form-error" role="alert">{{ saveError }}</p>
         <div class="settings-actions"><button ref="noticesButton" class="notices-link" type="button" @click="openNotices" :disabled="saving">{{ tr('notices') }}</button><button type="button" @click="showSettings = false" :disabled="saving">{{ tr('cancel') }}</button><button type="submit" :disabled="saving">{{ tr(saving ? 'saving' : 'save') }}</button></div>

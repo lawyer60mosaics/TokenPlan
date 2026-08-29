@@ -1,0 +1,85 @@
+name: Build iOS IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios-ipa.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-ipa-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Test and package unsigned IPA
+    runs-on: macos-15
+    timeout-minutes: 35
+    defaults:
+      run:
+        working-directory: ios
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Resolve Swift packages
+        run: xcodebuild -resolvePackageDependencies -project TokenPlan.xcodeproj -scheme TokenPlan
+
+      - name: Run iOS tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          simulator_id=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; data=json.load(sys.stdin); print(next(d["udid"] for runtime in data["devices"].values() for d in runtime if d["name"].startswith("iPhone")))')
+          xcodebuild test \
+            -project TokenPlan.xcodeproj \
+            -scheme TokenPlan \
+            -destination "platform=iOS Simulator,id=${simulator_id}" \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Build unsigned device app
+        run: |
+          xcodebuild build \
+            -project TokenPlan.xcodeproj \
+            -scheme TokenPlan \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=''
+
+      - name: Package IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          app_path="build/DerivedData/Build/Products/Release-iphoneos/TokenPlan.app"
+          test -d "$app_path"
+          rm -rf build/package
+          mkdir -p build/package/Payload
+          ditto "$app_path" build/package/Payload/TokenPlan.app
+          (cd build/package && /usr/bin/zip -qry ../TokenPlan-unsigned.ipa Payload)
+          shasum -a 256 build/TokenPlan-unsigned.ipa | tee build/TokenPlan-unsigned.ipa.sha256
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TokenPlan-iOS-unsigned
+          path: |
+            ios/build/TokenPlan-unsigned.ipa
+            ios/build/TokenPlan-unsigned.ipa.sha256
+          if-no-files-found: error
+          retention-days: 14

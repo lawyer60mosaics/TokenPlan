@@ -3,28 +3,62 @@ mod deepseek;
 mod http_client;
 mod profiles;
 mod subscription;
+mod sync;
 
 use profiles::Profile;
-use std::{fs, path::PathBuf};
+use std::{
+    fs, iter,
+    os::windows::ffi::OsStrExt,
+    path::{Path, PathBuf},
+};
 use windows_sys::Win32::Security::Cryptography::{
     CryptProtectData, CryptUnprotectData, CRYPT_INTEGER_BLOB,
 };
+use windows_sys::Win32::Storage::FileSystem::{
+    MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+};
 use winreg::{enums::HKEY_CURRENT_USER, RegKey};
 
-fn config_path() -> PathBuf {
+pub(crate) fn app_data_dir() -> PathBuf {
     dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("VolcengineTokenPlan")
-        .join("profiles.dat")
+}
+pub(crate) fn replace_file(source: &Path, destination: &Path) -> Result<(), String> {
+    let source: Vec<u16> = source
+        .as_os_str()
+        .encode_wide()
+        .chain(iter::once(0))
+        .collect();
+    let destination: Vec<u16> = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(iter::once(0))
+        .collect();
+    let result = unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if result == 0 {
+        Err(std::io::Error::last_os_error().to_string())
+    } else {
+        Ok(())
+    }
+}
+fn config_path() -> PathBuf {
+    app_data_dir().join("profiles.dat")
 }
 #[link(name = "kernel32")]
 unsafe extern "system" {
     fn LocalFree(hmem: isize) -> isize;
 }
 
-fn protect(input: &[u8], unprotect: bool) -> Result<Vec<u8>, String> {
+pub(crate) fn protect(input: &[u8], unprotect: bool) -> Result<Vec<u8>, String> {
     unsafe {
-        let mut source = CRYPT_INTEGER_BLOB {
+        let source = CRYPT_INTEGER_BLOB {
             cbData: input.len() as u32,
             pbData: input.as_ptr() as *mut u8,
         };
@@ -34,7 +68,7 @@ fn protect(input: &[u8], unprotect: bool) -> Result<Vec<u8>, String> {
         };
         let ok = if unprotect {
             CryptUnprotectData(
-                &mut source,
+                &source,
                 std::ptr::null_mut(),
                 std::ptr::null_mut(),
                 std::ptr::null_mut(),
@@ -44,7 +78,7 @@ fn protect(input: &[u8], unprotect: bool) -> Result<Vec<u8>, String> {
             )
         } else {
             CryptProtectData(
-                &mut source,
+                &source,
                 std::ptr::null(),
                 std::ptr::null_mut(),
                 std::ptr::null_mut(),
@@ -79,9 +113,9 @@ fn load_profiles_impl() -> Result<Vec<Profile>, String> {
     Ok(profiles)
 }
 
-fn save_profiles_impl(profiles: Vec<Profile>) -> Result<(), String> {
+pub(crate) fn validate_profiles(profiles: &[Profile]) -> Result<(), String> {
     let mut ids = std::collections::HashSet::new();
-    for p in &profiles {
+    for p in profiles {
         if p.id.is_empty()
             || !ids.insert(&p.id)
             || p.name.trim().is_empty()
@@ -90,6 +124,11 @@ fn save_profiles_impl(profiles: Vec<Profile>) -> Result<(), String> {
             return Err("Invalid or duplicate profile / 无效或重复的配置".into());
         }
     }
+    Ok(())
+}
+
+pub(crate) fn save_profiles_impl(profiles: Vec<Profile>) -> Result<(), String> {
+    validate_profiles(&profiles)?;
     let path = config_path();
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -101,7 +140,7 @@ fn save_profiles_impl(profiles: Vec<Profile>) -> Result<(), String> {
     }
     let temp = path.with_extension("dat.tmp");
     fs::write(&temp, encrypted).map_err(|e| e.to_string())?;
-    fs::rename(temp, path).map_err(|e| e.to_string())
+    replace_file(&temp, &path)
 }
 
 #[derive(serde::Serialize)]
@@ -198,6 +237,30 @@ mod commands {
         autostart_state()
     }
     #[tauri::command]
+    pub fn get_sync_state() -> Result<Option<sync::SyncState>, String> {
+        sync::state()
+    }
+    #[tauri::command]
+    pub fn configure_sync(
+        endpoint: String,
+        token: String,
+        recovery_key: Option<String>,
+    ) -> Result<sync::ConfigureResult, String> {
+        sync::configure(endpoint, token, recovery_key)
+    }
+    #[tauri::command]
+    pub fn disable_sync() -> Result<(), String> {
+        sync::disable()
+    }
+    #[tauri::command]
+    pub async fn push_sync(profiles: Vec<Profile>) -> Result<sync::SyncState, String> {
+        sync::push(profiles).await
+    }
+    #[tauri::command]
+    pub async fn pull_sync() -> Result<sync::PullResult, String> {
+        sync::pull().await
+    }
+    #[tauri::command]
     pub fn exit_app(app: tauri::AppHandle) {
         app.exit(0)
     }
@@ -245,6 +308,11 @@ pub fn run() {
             commands::query_profile,
             commands::set_autostart,
             commands::get_autostart,
+            commands::get_sync_state,
+            commands::configure_sync,
+            commands::disable_sync,
+            commands::push_sync,
+            commands::pull_sync,
             commands::exit_app
         ])
         .run(tauri::generate_context!())
@@ -260,5 +328,26 @@ mod tests {
         let encrypted = protect(raw, false).unwrap();
         assert!(!encrypted.windows(13).any(|w| w == b"fictional-key"));
         assert_eq!(protect(&encrypted, true).unwrap(), raw);
+    }
+
+    #[test]
+    fn replace_file_overwrites_existing_destination() {
+        let directory = std::env::temp_dir().join(format!(
+            "tokenplan-replace-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        let source = directory.join("source.tmp");
+        let destination = directory.join("destination.dat");
+        fs::write(&source, b"new").unwrap();
+        fs::write(&destination, b"old").unwrap();
+        replace_file(&source, &destination).unwrap();
+        assert_eq!(fs::read(&destination).unwrap(), b"new");
+        assert!(!source.exists());
+        fs::remove_dir_all(directory).unwrap();
     }
 }

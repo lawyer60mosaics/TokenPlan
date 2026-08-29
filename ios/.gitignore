@@ -1,0 +1,4 @@
+build/
+TokenPlan.xcodeproj/
+xcuserdata/
+*.xcarchive

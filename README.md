@@ -53,6 +53,12 @@ npx tauri build --debug
 
 Backend parsing and local HTTP contract tests do not prove a real account can access a service. Newly added providers require your own active subscription and credentials for live verification. Third-party quota APIs can change; OpenCode Go's usage route is undocumented, so unrecognized responses are surfaced as errors.
 
+## iOS
+
+`ios/` contains the native SwiftUI client and XcodeGen project definition. It shares the cloud vault format with Windows: XChaCha20-Poly1305, a 24-byte nonce, URL-safe Base64 and the `tokenplan-vault-v1` authenticated-data value. The sync token and recovery key are stored in Keychain; decrypted profiles use iOS Complete File Protection.
+
+Run the **Build iOS IPA** GitHub Actions workflow to compile on a macOS runner. With no Apple signing secrets, the artifact is `TokenPlan-unsigned.ipa`, intended for signing with a sideloading tool. Direct device installation, Ad Hoc distribution and TestFlight still require an Apple Developer certificate and provisioning profile. See [ios/README.md](ios/README.md).
+
 ## 致谢与许可 / Acknowledgments & licensing
 
 软件内可通过「设置 → 致谢与许可」离线查看完整说明。返回设置不会丢弃未保存的配置。

@@ -1,0 +1,21 @@
+[Unit]
+Description=Back up TokenPlan encrypted sync database
+
+[Service]
+Type=oneshot
+User=tokenplan
+Group=tokenplan
+ExecStart=/usr/local/sbin/tokenplan-backup
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/var/lib/tokenplan
+ReadWritePaths=/var/backups/tokenplan
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+UMask=0077

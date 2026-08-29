@@ -3,6 +3,7 @@ node_modules/
 dist/
 src-tauri/target/
 src-tauri/gen/
+sync-server/target/
 
 # Local credentials and encrypted profile files (including backups)
 .env

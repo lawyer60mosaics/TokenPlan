@@ -14,9 +14,11 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 hmac = "0.12"
 sha2 = "0.10"
 base64 = "0.22"
+chacha20poly1305 = "0.10"
+getrandom = "0.3"
 dirs = "6"
 chrono = { version = "0.4", features = ["clock"] }
-windows-sys = { version = "0.59", features = ["Win32_Security_Cryptography", "Win32_System_Registry", "Win32_System_Memory"] }
+windows-sys = { version = "0.59", features = ["Win32_Security_Cryptography", "Win32_Storage_FileSystem", "Win32_System_Registry", "Win32_System_Memory"] }
 winreg = "0.55"
 
 [dev-dependencies]
