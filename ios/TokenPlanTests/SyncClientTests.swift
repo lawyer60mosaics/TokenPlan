@@ -59,7 +59,8 @@ final class SyncClientTests: XCTestCase {
             return (response, Data(#"{"revision":5}"#.utf8))
         }
         let client = try SyncClient(endpoint: "https://47.102.119.11", token: token, session: session)
-        XCTAssertEqual(try await client.push(envelope, revision: 4), 5)
+        let revision = try await client.push(envelope, revision: 4)
+        XCTAssertEqual(revision, 5)
     }
 
     func testConflictIsReported() async throws {
