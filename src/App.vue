@@ -22,10 +22,10 @@ const copy = {
     missingTeam: '智谱团队版还需要组织 ID 和项目 ID', invalidZenmux: '请填写 zenmux.ai / zenmux.com 的完整 HTTPS 用量接口地址',
     unsupported: '不支持的套餐类型', nameRequired: '请填写配置名称', loadFailed: '配置读取失败，已禁止覆盖原文件',
     saveFailed: '保存失败：', autostartFailed: '套餐已保存，但开机自启动设置失败：', amount: '已用 / 上限',
-    cloudSync: '云同步', syncEndpoint: '服务器地址', syncToken: '同步令牌', recoveryKey: '恢复密钥',
-    configureSync: '配置云同步', uploadCloud: '上传', downloadCloud: '下载', disableSync: '停用',
-    syncReady: '已配置，云端版本', syncOff: '未配置', tokenRequired: '请填写同步令牌',
-    recoveryWarning: '恢复密钥用于其他设备解密，服务器无法找回。请离线保存。',
+    cloudSync: '云同步', syncAccount: '账号', syncPassword: '密码',
+    configureSync: '保存账号密码', uploadCloud: '上传', downloadCloud: '下载', disableSync: '停用',
+    syncReady: '已配置，云端版本', syncOff: '未配置', credentialsRequired: '请输入账号和至少 16 位密码',
+    credentialsHint: '其他设备使用相同账号和密码即可同步。认证与加密密钥由应用自动生成。',
     syncConfigured: '云同步配置成功', uploadSuccess: '已上传加密配置', downloadSuccess: '已下载并替换本地配置',
     localSavedSyncFailed: '本地已保存，云同步失败：', syncFailed: '云同步失败：',
     hint: '每 60 秒自动查询所有启用的配置。', dragFailed: '窗口拖动失败：',
@@ -44,10 +44,10 @@ const copy = {
     missingTeam: 'Zhipu Team also needs organization and project IDs', invalidZenmux: 'Enter a full HTTPS usage URL on zenmux.ai / zenmux.com',
     unsupported: 'Unsupported provider', nameRequired: 'Enter a profile name', loadFailed: 'Cannot read profiles; original file protected from overwrite',
     saveFailed: 'Save failed: ', autostartFailed: 'Plans saved, but startup setting failed: ', amount: 'Used / Limit',
-    cloudSync: 'Cloud sync', syncEndpoint: 'Server URL', syncToken: 'Sync token', recoveryKey: 'Recovery key',
-    configureSync: 'Configure cloud sync', uploadCloud: 'Upload', downloadCloud: 'Download', disableSync: 'Disable',
-    syncReady: 'Configured, cloud revision', syncOff: 'Not configured', tokenRequired: 'Enter the sync token',
-    recoveryWarning: 'The recovery key decrypts data on other devices and cannot be recovered by the server. Store it offline.',
+    cloudSync: 'Cloud sync', syncAccount: 'Account', syncPassword: 'Password',
+    configureSync: 'Save account and password', uploadCloud: 'Upload', downloadCloud: 'Download', disableSync: 'Disable',
+    syncReady: 'Configured, cloud revision', syncOff: 'Not configured', credentialsRequired: 'Enter an account and a password of at least 16 characters',
+    credentialsHint: 'Use the same account and password on another device. The app derives separate authentication and encryption keys automatically.',
     syncConfigured: 'Cloud sync configured', uploadSuccess: 'Encrypted profiles uploaded', downloadSuccess: 'Cloud profiles downloaded and applied locally',
     localSavedSyncFailed: 'Saved locally, but cloud sync failed: ', syncFailed: 'Cloud sync failed: ',
     hint: 'Every enabled profile refreshes automatically every 60 seconds.', dragFailed: 'Window drag failed: ',
@@ -73,7 +73,7 @@ const showSettings = ref(false), showError = ref(false), dragError = ref(''), lo
 const showNotices = ref(false), noticesButton = ref(null), noticesScroll = ref(null), noticesBack = ref(null);
 const drafts = ref([]), draftId = ref(''), saveError = ref(''), saving = ref(false), confirmDelete = ref('');
 const autostart = ref(false);
-const syncState = ref(null), syncEndpoint = ref('https://47.102.119.11'), syncToken = ref(''), syncRecoveryKey = ref('');
+const syncState = ref(null), syncUsername = ref(''), syncPassword = ref('');
 const syncMessage = ref(''), syncing = ref(false);
 const draft = computed(() => drafts.value.find(p => p.id === draftId.value));
 const draftMeta = computed(() => providerInfo(draft.value?.provider));
@@ -128,23 +128,20 @@ function settings(add = false) {
 async function loadSyncState() {
   try {
     syncState.value = await invoke('get_sync_state');
-    if (syncState.value?.endpoint) syncEndpoint.value = syncState.value.endpoint;
+    if (syncState.value?.username) syncUsername.value = syncState.value.username;
   } catch (error) { syncMessage.value = tr('syncFailed') + String(error); }
 }
 async function configureCloudSync() {
   if (syncing.value) return;
-  if (!syncToken.value.trim()) { syncMessage.value = tr('tokenRequired'); return; }
+  if (!syncUsername.value.trim() || syncPassword.value.length < 16) { syncMessage.value = tr('credentialsRequired'); return; }
   syncing.value = true;
   syncMessage.value = '';
   try {
-    const result = await invoke('configure_sync', {
-      endpoint: syncEndpoint.value,
-      token: syncToken.value,
-      recoveryKey: syncRecoveryKey.value.trim() || null,
+    syncState.value = await invoke('configure_sync', {
+      username: syncUsername.value,
+      password: syncPassword.value,
     });
-    syncState.value = result.state;
-    syncRecoveryKey.value = result.recoveryKey;
-    syncToken.value = '';
+    syncPassword.value = '';
     syncMessage.value = tr('syncConfigured');
   } catch (error) { syncMessage.value = tr('syncFailed') + String(error); }
   finally { syncing.value = false; }
@@ -183,8 +180,8 @@ async function disableCloudSync() {
   try {
     await invoke('disable_sync');
     syncState.value = null;
-    syncToken.value = '';
-    syncRecoveryKey.value = '';
+    syncUsername.value = '';
+    syncPassword.value = '';
     syncMessage.value = tr('syncOff');
   } catch (error) { syncMessage.value = tr('syncFailed') + String(error); }
   finally { syncing.value = false; }
@@ -350,10 +347,9 @@ onUnmounted(() => { disposed = true; clearInterval(timer); unlisten?.(); });
           <p class="hint">{{ tr('hint') }} {{ tr('saved') }}</p>
           <section class="sync-settings" :aria-label="tr('cloudSync')">
             <div class="sync-heading"><strong>{{ tr('cloudSync') }}</strong><span>{{ syncState?.enabled ? tr('syncReady') + ' ' + syncState.revision : tr('syncOff') }}</span></div>
-            <label>{{ tr('syncEndpoint') }}<input v-model="syncEndpoint" type="url" inputmode="url" autocomplete="off" spellcheck="false" :disabled="syncing" /></label>
-            <label>{{ tr('syncToken') }}<input v-model="syncToken" type="password" autocomplete="off" spellcheck="false" :disabled="syncing" /></label>
-            <label>{{ tr('recoveryKey') }}<input v-model="syncRecoveryKey" type="password" autocomplete="off" spellcheck="false" :disabled="syncing" /></label>
-            <p class="hint">{{ tr('recoveryWarning') }}</p>
+            <label>{{ tr('syncAccount') }}<input v-model="syncUsername" type="text" autocomplete="username" spellcheck="false" :disabled="syncing" /></label>
+            <label>{{ tr('syncPassword') }}<input v-model="syncPassword" type="password" autocomplete="current-password" spellcheck="false" :disabled="syncing" /></label>
+            <p class="hint">{{ tr('credentialsHint') }}</p>
             <div class="sync-actions">
               <button type="button" @click="configureCloudSync" :disabled="syncing">{{ tr('configureSync') }}</button>
               <button v-if="syncState?.enabled" type="button" @click="uploadCloud" :disabled="syncing">{{ tr('uploadCloud') }}</button>

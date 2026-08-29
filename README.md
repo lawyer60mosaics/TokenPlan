@@ -55,7 +55,7 @@ Backend parsing and local HTTP contract tests do not prove a real account can ac
 
 ## iOS
 
-`ios/` contains the native SwiftUI client and XcodeGen project definition. It shares the cloud vault format with Windows: XChaCha20-Poly1305, a 24-byte nonce, URL-safe Base64 and the `tokenplan-vault-v1` authenticated-data value. The sync token and recovery key are stored in Keychain; decrypted profiles use iOS Complete File Protection.
+`ios/` contains the native SwiftUI client and XcodeGen project definition. The cloud server address is built into both clients; users enter only an account and password. Both clients derive separate authentication and vault keys, then use XChaCha20-Poly1305 with a 24-byte nonce, URL-safe Base64 and the `tokenplan-vault-v2` authenticated-data value. The account and password are stored with Windows DPAPI or iOS Keychain; decrypted iOS profiles use Complete File Protection.
 
 Run the **Build iOS IPA** GitHub Actions workflow to compile on a macOS runner. With no Apple signing secrets, the artifact is `TokenPlan-unsigned.ipa`, intended for signing with a sideloading tool. Direct device installation, Ad Hoc distribution and TestFlight still require an Apple Developer certificate and provisioning profile. See [ios/README.md](ios/README.md).
 

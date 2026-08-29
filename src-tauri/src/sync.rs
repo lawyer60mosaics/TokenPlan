@@ -6,33 +6,34 @@ use chacha20poly1305::{
 };
 use reqwest::{header, redirect::Policy, StatusCode, Url};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::{fs, path::PathBuf, time::Duration};
 
-const SCHEMA_VERSION: u32 = 1;
-const AAD: &[u8] = b"tokenplan-vault-v1";
+const ENDPOINT: &str = "https://47.102.119.11";
+const SCHEMA_VERSION: u32 = 2;
+const AAD: &[u8] = b"tokenplan-vault-v2";
 
 #[derive(Clone, Serialize, Deserialize)]
 struct SyncConfig {
     enabled: bool,
+    username: String,
+    password: String,
+    revision: u64,
+}
+
+#[derive(Deserialize)]
+struct LegacySyncConfig {
     endpoint: String,
     token: String,
     vault_key: String,
-    revision: u64,
 }
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncState {
     enabled: bool,
-    endpoint: String,
+    username: String,
     revision: u64,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ConfigureResult {
-    state: SyncState,
-    recovery_key: String,
 }
 
 #[derive(Serialize)]
@@ -64,7 +65,7 @@ impl From<&SyncConfig> for SyncState {
     fn from(config: &SyncConfig) -> Self {
         Self {
             enabled: config.enabled,
-            endpoint: config.endpoint.clone(),
+            username: config.username.clone(),
             revision: config.revision,
         }
     }
@@ -80,13 +81,17 @@ fn load_config() -> Result<Option<SyncConfig>, String> {
         return Ok(None);
     }
     let decrypted = protect(&fs::read(path).map_err(|e| e.to_string())?, true)?;
-    let config: SyncConfig = serde_json::from_slice(&decrypted)
-        .map_err(|_| "Invalid sync configuration / 云同步配置无法解析".to_string())?;
-    validate_endpoint(&config.endpoint)?;
-    if config.token.len() < 32 {
-        return Err("Invalid sync token / 云同步令牌无效".into());
-    }
-    decode_key(&config.vault_key)?;
+    let config: SyncConfig = match serde_json::from_slice(&decrypted) {
+        Ok(config) => config,
+        Err(_) => {
+            if let Ok(legacy) = serde_json::from_slice::<LegacySyncConfig>(&decrypted) {
+                let _ = (legacy.endpoint, legacy.token, legacy.vault_key);
+                return Ok(None);
+            }
+            return Err("Invalid sync configuration / 云同步配置无法解析".into());
+        }
+    };
+    validate_credentials(&config.username, &config.password)?;
     Ok(Some(config))
 }
 
@@ -105,24 +110,45 @@ fn save_config(config: &SyncConfig) -> Result<(), String> {
     replace_file(&temporary, &path)
 }
 
-fn decode_key(value: &str) -> Result<[u8; 32], String> {
-    let bytes = URL_SAFE_NO_PAD
-        .decode(value.trim())
-        .map_err(|_| "Invalid recovery key / 恢复密钥无效".to_string())?;
-    bytes
-        .try_into()
-        .map_err(|_| "Invalid recovery key / 恢复密钥无效".to_string())
+fn validate_credentials(username: &str, password: &str) -> Result<(), String> {
+    let username_valid = (3..=64).contains(&username.len())
+        && username
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"._-@".contains(&byte));
+    if !username_valid {
+        return Err("Account must use 3-64 letters, numbers, . _ - @ / 账号格式无效".into());
+    }
+    if !(16..=128).contains(&password.len()) {
+        return Err("Password must contain 16-128 characters / 密码至少需要 16 个字符".into());
+    }
+    Ok(())
 }
 
-fn generate_key() -> Result<String, String> {
-    let mut bytes = [0_u8; 32];
-    getrandom::fill(&mut bytes).map_err(|_| "Cannot generate recovery key / 无法生成恢复密钥")?;
-    Ok(URL_SAFE_NO_PAD.encode(bytes))
+fn derive(domain: &[u8], username: &str, password: &str) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(domain);
+    hasher.update([0]);
+    hasher.update(username.as_bytes());
+    hasher.update([0]);
+    hasher.update(password.as_bytes());
+    hasher.finalize().into()
 }
 
-fn validate_endpoint(endpoint: &str) -> Result<Url, String> {
-    let mut url = Url::parse(endpoint.trim())
-        .map_err(|_| "Invalid sync endpoint / 云同步地址无效".to_string())?;
+fn auth_token(config: &SyncConfig) -> String {
+    URL_SAFE_NO_PAD.encode(derive(
+        b"tokenplan-auth-v2",
+        &config.username,
+        &config.password,
+    ))
+}
+
+fn vault_key(config: &SyncConfig) -> [u8; 32] {
+    derive(b"tokenplan-vault-v2", &config.username, &config.password)
+}
+
+fn vault_url() -> Result<Url, String> {
+    let mut url =
+        Url::parse(ENDPOINT).map_err(|_| "Invalid sync endpoint / 云同步地址无效".to_string())?;
     if url.scheme() != "https"
         || url.host_str().is_none()
         || !url.username().is_empty()
@@ -132,7 +158,7 @@ fn validate_endpoint(endpoint: &str) -> Result<Url, String> {
         || !matches!(url.path(), "" | "/")
         || url.port().is_some_and(|port| port != 443)
     {
-        return Err("Sync endpoint must be an HTTPS origin / 云同步地址必须是 HTTPS 根地址".into());
+        return Err("Built-in sync endpoint is invalid / 内置同步地址无效".into());
     }
     url.set_path("/api/v1/vault");
     Ok(url)
@@ -190,49 +216,30 @@ fn decrypt(key: &[u8; 32], envelope: &VaultEnvelope) -> Result<Vec<u8>, String> 
                 aad: AAD,
             },
         )
-        .map_err(|_| "Cannot decrypt cloud profiles; check the recovery key / 无法解密云端配置，请检查恢复密钥".into())
+        .map_err(|_| "Cannot decrypt cloud profiles; check account and password / 无法解密云端配置，请检查账号密码".into())
 }
 
 pub fn state() -> Result<Option<SyncState>, String> {
     Ok(load_config()?.as_ref().map(SyncState::from))
 }
 
-pub fn configure(
-    endpoint: String,
-    token: String,
-    recovery_key: Option<String>,
-) -> Result<ConfigureResult, String> {
-    let endpoint = endpoint.trim().trim_end_matches('/').to_string();
-    validate_endpoint(&endpoint)?;
-    let token = token.trim().to_string();
-    if token.len() < 32 {
-        return Err(
-            "Sync token must contain at least 32 characters / 云同步令牌至少需要 32 个字符".into(),
-        );
-    }
+pub fn configure(username: String, password: String) -> Result<SyncState, String> {
+    vault_url()?;
+    let username = username.trim().to_string();
+    validate_credentials(&username, &password)?;
     let existing = load_config()?;
-    let supplied_key = recovery_key.unwrap_or_default().trim().to_string();
-    let (vault_key, revision) = if supplied_key.is_empty() {
-        existing
-            .as_ref()
-            .map(|config| (config.vault_key.clone(), config.revision))
-            .unwrap_or((generate_key()?, 0))
-    } else {
-        decode_key(&supplied_key)?;
-        (supplied_key, 0)
-    };
+    let revision = existing
+        .as_ref()
+        .filter(|config| config.username == username && config.password == password)
+        .map_or(0, |config| config.revision);
     let config = SyncConfig {
         enabled: true,
-        endpoint,
-        token,
-        vault_key: vault_key.clone(),
+        username,
+        password,
         revision,
     };
     save_config(&config)?;
-    Ok(ConfigureResult {
-        state: SyncState::from(&config),
-        recovery_key: vault_key,
-    })
+    Ok(SyncState::from(&config))
 }
 
 pub fn disable() -> Result<(), String> {
@@ -253,12 +260,12 @@ pub async fn push(profiles: Vec<Profile>) -> Result<SyncState, String> {
     if !config.enabled {
         return Err("Cloud sync is disabled / 云同步已关闭".into());
     }
-    let key = decode_key(&config.vault_key)?;
+    let key = vault_key(&config);
     let plaintext = serde_json::to_vec(&profiles).map_err(|e| e.to_string())?;
     let envelope = encrypt(&key, &plaintext)?;
     let response = client()?
-        .put(validate_endpoint(&config.endpoint)?)
-        .bearer_auth(&config.token)
+        .put(vault_url()?)
+        .bearer_auth(auth_token(&config))
         .header(header::IF_MATCH, format!("\"{}\"", config.revision))
         .json(&envelope)
         .send()
@@ -270,7 +277,7 @@ pub async fn push(profiles: Vec<Profile>) -> Result<SyncState, String> {
         );
     }
     if response.status() == StatusCode::UNAUTHORIZED {
-        return Err("Cloud sync token was rejected / 云同步令牌被拒绝".into());
+        return Err("Cloud account or password was rejected / 云同步账号或密码错误".into());
     }
     if !response.status().is_success() {
         return Err(format!(
@@ -290,8 +297,8 @@ pub async fn push(profiles: Vec<Profile>) -> Result<SyncState, String> {
 pub async fn pull() -> Result<PullResult, String> {
     let mut config = load_config()?.ok_or("Cloud sync is not configured / 尚未配置云同步")?;
     let response = client()?
-        .get(validate_endpoint(&config.endpoint)?)
-        .bearer_auth(&config.token)
+        .get(vault_url()?)
+        .bearer_auth(auth_token(&config))
         .send()
         .await
         .map_err(|_| "Cloud sync request failed / 云同步请求失败")?;
@@ -299,7 +306,7 @@ pub async fn pull() -> Result<PullResult, String> {
         return Err("Cloud vault is empty / 云端尚无配置".into());
     }
     if response.status() == StatusCode::UNAUTHORIZED {
-        return Err("Cloud sync token was rejected / 云同步令牌被拒绝".into());
+        return Err("Cloud account or password was rejected / 云同步账号或密码错误".into());
     }
     if !response.status().is_success() {
         return Err(format!(
@@ -311,7 +318,7 @@ pub async fn pull() -> Result<PullResult, String> {
         .json()
         .await
         .map_err(|_| "Invalid cloud response / 云端响应无效")?;
-    let plaintext = decrypt(&decode_key(&config.vault_key)?, &vault.envelope)?;
+    let plaintext = decrypt(&vault_key(&config), &vault.envelope)?;
     let profiles: Vec<Profile> = serde_json::from_slice(&plaintext)
         .map_err(|_| "Invalid profiles in cloud vault / 云端套餐配置无效")?;
     validate_profiles(&profiles)?;
@@ -341,16 +348,32 @@ mod tests {
     }
 
     #[test]
-    fn sync_endpoint_requires_clean_https_origin() {
-        assert!(validate_endpoint("https://47.102.119.11").is_ok());
-        for endpoint in [
-            "http://47.102.119.11",
-            "https://user:pass@47.102.119.11",
-            "https://47.102.119.11/path",
-            "https://47.102.119.11?token=bad",
-        ] {
-            assert!(validate_endpoint(endpoint).is_err(), "{endpoint}");
-        }
+    fn built_in_endpoint_and_credentials_are_validated() {
+        assert_eq!(
+            vault_url().unwrap().as_str(),
+            "https://47.102.119.11/api/v1/vault"
+        );
+        assert!(validate_credentials("tokenplan", "1234567890abcdef").is_ok());
+        assert!(validate_credentials("bad account", "1234567890abcdef").is_err());
+        assert!(validate_credentials("tokenplan", "short").is_err());
+    }
+
+    #[test]
+    fn account_password_derives_separate_auth_and_vault_keys() {
+        let config = SyncConfig {
+            enabled: true,
+            username: "tokenplan".into(),
+            password: "correct-horse-1234".into(),
+            revision: 0,
+        };
+        assert_eq!(
+            auth_token(&config),
+            "oNgFfFG1T4-ATA1kPkTCHqMSqXyDfZraNWRv4l0vNBY"
+        );
+        assert_eq!(
+            URL_SAFE_NO_PAD.encode(vault_key(&config)),
+            "KP7wj6TG07KvuvKeUYT1mdQY4L361j-GJxg5V3Iu0Sk"
+        );
     }
 
     #[test]
@@ -369,7 +392,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             URL_SAFE_NO_PAD.encode(ciphertext),
-            "5QnA4xiIQ0CSe3BIHQFiyQbR1uopPvaE368ifrVPMC_rRS66vqnICfd2XXcCwjHCI4RTXMIszKE"
+            "5QnA4xiIQ0CSe3BIHQFiyQbR1uopPvaE368ifrVPMC_rRS66vqnICUBFvZYuG0oyxMEcQJnVQxo"
         );
     }
 }

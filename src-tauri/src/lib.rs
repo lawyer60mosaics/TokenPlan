@@ -241,12 +241,8 @@ mod commands {
         sync::state()
     }
     #[tauri::command]
-    pub fn configure_sync(
-        endpoint: String,
-        token: String,
-        recovery_key: Option<String>,
-    ) -> Result<sync::ConfigureResult, String> {
-        sync::configure(endpoint, token, recovery_key)
+    pub fn configure_sync(username: String, password: String) -> Result<sync::SyncState, String> {
+        sync::configure(username, password)
     }
     #[tauri::command]
     pub fn disable_sync() -> Result<(), String> {

@@ -3,39 +3,26 @@ import SwiftUI
 struct SyncSettingsView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
-    @State private var showingRecoveryKey = false
-
     var body: some View {
         NavigationStack {
             Form {
-                Section("服务器") {
-                    TextField("HTTPS 地址", text: $model.endpoint)
-                        .textInputAutocapitalization(.never)
-                        .keyboardType(.URL)
-                        .autocorrectionDisabled()
-                    SecureField("同步令牌", text: $model.token)
+                Section("账号") {
+                    TextField("账号", text: $model.username)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                }
-                Section("端到端加密") {
-                    Group {
-                        if showingRecoveryKey {
-                            TextField("恢复密钥", text: $model.recoveryKey)
-                        } else {
-                            SecureField("恢复密钥（首次设备可留空）", text: $model.recoveryKey)
-                        }
-                    }
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    Toggle("显示恢复密钥", isOn: $showingRecoveryKey)
-                    Text("首次配置留空会生成新密钥。已有云端数据时必须填写原恢复密钥；服务器无法找回该密钥。")
+                        .textContentType(.username)
+                    SecureField("密码（至少 16 位）", text: $model.password)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .textContentType(.password)
+                    Text("其他设备输入相同账号和密码即可同步。应用会自动生成独立的认证与加密密钥。")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
                 Section("状态") {
                     LabeledContent("连接", value: model.isSyncConfigured ? "已配置" : "未配置")
                     LabeledContent("云端版本", value: String(model.revision))
-                    Button("保存同步配置") { Task { await model.configure() } }
+                    Button("保存账号密码") { Task { await model.configure() } }
                         .disabled(model.isBusy)
                     if model.isSyncConfigured {
                         Button("从云端下载") { Task { await model.pull() } }

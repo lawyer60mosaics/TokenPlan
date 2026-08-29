@@ -5,9 +5,10 @@
 ## 当前功能
 
 - 查看、新增、编辑、删除八类套餐配置。
-- 通过 `https://47.102.119.11/api/v1/vault` 上传和下载。
-- 使用 Swift-Sodium XChaCha20-Poly1305、24 字节随机 nonce 和 `tokenplan-vault-v1` AAD，与 Rust 客户端互通。
-- 同步令牌和恢复密钥存入 Keychain，访问级别为 `WhenUnlockedThisDeviceOnly`。
+- 云服务器地址内置，设置页只需要输入账号和密码。
+- 从账号密码分别派生认证密钥和数据密钥，两种用途不会共用密钥。
+- 使用 Swift-Sodium XChaCha20-Poly1305、24 字节随机 nonce 和 `tokenplan-vault-v2` AAD，与 Rust 客户端互通。
+- 账号和密码存入 Keychain，访问级别为 `WhenUnlockedThisDeviceOnly`。
 - 解密后的本地套餐文件使用 iOS Complete File Protection 和原子写入。
 - 使用 revision + `If-Match` 阻止离线设备静默覆盖较新的云端数据。
 

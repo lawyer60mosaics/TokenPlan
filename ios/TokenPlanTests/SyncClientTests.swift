@@ -26,24 +26,18 @@ final class SyncClientTests: XCTestCase {
         super.tearDown()
     }
 
-    func testEndpointRejectsHTTPPathsAndCredentials() {
-        let token = String(repeating: "a", count: 32)
-        for endpoint in [
-            "http://47.102.119.11",
-            "https://user:pass@47.102.119.11",
-            "https://47.102.119.11/path",
-            "https://47.102.119.11?token=bad"
-        ] {
-            XCTAssertThrowsError(try SyncClient(endpoint: endpoint, token: token), endpoint)
-        }
+    func testCredentialsAreValidated() {
+        XCTAssertThrowsError(try SyncClient(username: "ab", password: "correct-horse-1234"))
+        XCTAssertThrowsError(try SyncClient(username: "token plan", password: "correct-horse-1234"))
+        XCTAssertThrowsError(try SyncClient(username: "tokenplan", password: "short"))
     }
 
     func testPushUsesBearerAndRevisionWithoutPlaintext() async throws {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [MockURLProtocol.self]
         let session = URLSession(configuration: configuration)
-        let token = String(repeating: "b", count: 32)
-        let envelope = VaultEnvelope(schemaVersion: 1, nonce: "nonce", ciphertext: "ciphertext")
+        let token = "oNgFfFG1T4-ATA1kPkTCHqMSqXyDfZraNWRv4l0vNBY"
+        let envelope = VaultEnvelope(schemaVersion: 2, nonce: "nonce", ciphertext: "ciphertext")
         MockURLProtocol.handler = { request in
             XCTAssertEqual(request.url?.absoluteString, "https://47.102.119.11/api/v1/vault")
             XCTAssertEqual(request.httpMethod, "PUT")
@@ -58,7 +52,7 @@ final class SyncClientTests: XCTestCase {
             )!
             return (response, Data(#"{"revision":5}"#.utf8))
         }
-        let client = try SyncClient(endpoint: "https://47.102.119.11", token: token, session: session)
+        let client = try SyncClient(username: "tokenplan", password: "correct-horse-1234", session: session)
         let revision = try await client.push(envelope, revision: 4)
         XCTAssertEqual(revision, 5)
     }
@@ -76,14 +70,10 @@ final class SyncClientTests: XCTestCase {
             )!
             return (response, Data())
         }
-        let client = try SyncClient(
-            endpoint: "https://47.102.119.11",
-            token: String(repeating: "c", count: 32),
-            session: session
-        )
+        let client = try SyncClient(username: "tokenplan", password: "correct-horse-1234", session: session)
         do {
             _ = try await client.push(
-                VaultEnvelope(schemaVersion: 1, nonce: "n", ciphertext: "c"),
+                VaultEnvelope(schemaVersion: 2, nonce: "n", ciphertext: "c"),
                 revision: 1
             )
             XCTFail("Expected conflict")

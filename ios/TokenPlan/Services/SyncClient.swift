@@ -28,23 +28,12 @@ struct UpdateResponse: Codable {
 }
 
 struct SyncClient {
-    let endpoint: URL
     let token: String
     var session: URLSession = .shared
 
-    init(endpoint: String, token: String, session: URLSession? = nil) throws {
-        guard let components = URLComponents(string: endpoint.trimmingCharacters(in: .whitespacesAndNewlines)),
-              components.scheme == "https", components.host != nil,
-              components.user == nil, components.password == nil,
-              components.query == nil, components.fragment == nil,
-              components.path.isEmpty || components.path == "/",
-              components.port == nil || components.port == 443,
-              let baseURL = components.url,
-              token.trimmingCharacters(in: .whitespacesAndNewlines).count >= 32 else {
-            throw TokenPlanError.invalidEndpoint
-        }
-        self.endpoint = baseURL
-        self.token = token.trimmingCharacters(in: .whitespacesAndNewlines)
+    init(username: String, password: String, session: URLSession? = nil) throws {
+        try SyncCredentials.validate(username: username, password: password)
+        self.token = SyncCredentials.authToken(username: username, password: password)
         if let session {
             self.session = session
         } else {
@@ -83,7 +72,7 @@ struct SyncClient {
     }
 
     private var vaultURL: URL {
-        endpoint.appendingPathComponent("api/v1/vault")
+        SyncCredentials.endpoint.appendingPathComponent("api/v1/vault")
     }
 
     private func validate(_ response: URLResponse, allowing statuses: Set<Int>) throws {
