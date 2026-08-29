@@ -48,12 +48,17 @@ targets:
       - path: Shared
     info:
       path: TokenPlanWidgets/Info.plist
+      properties:
+        CFBundleDisplayName: TokenPlan 小组件
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.xuwenxu.tokenplan.widgets
         CODE_SIGN_ENTITLEMENTS: TokenPlanWidgets/TokenPlanWidgets.entitlements
         CODE_SIGN_STYLE: Automatic
         APPLICATION_EXTENSION_API_ONLY: YES
+        GENERATE_INFOPLIST_FILE: NO
         SKIP_INSTALL: YES
   TokenPlanTests:
     type: bundle.unit-test
