@@ -9,11 +9,18 @@ struct ContentView: View {
         NavigationStack {
             Group {
                 if model.profiles.isEmpty {
-                    ContentUnavailableView(
-                        "尚无套餐",
-                        systemImage: "key.horizontal",
-                        description: Text("从云端下载，或在此设备添加套餐。")
-                    )
+                    VStack(spacing: 12) {
+                        Image(systemName: "key.horizontal")
+                            .font(.system(size: 42))
+                            .foregroundStyle(.secondary)
+                        Text("尚无套餐")
+                            .font(.title2.bold())
+                        Text("从云端下载，或在此设备添加套餐。")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .multilineTextAlignment(.center)
+                    .padding()
                 } else {
                     List {
                         ForEach(model.profiles) { profile in
