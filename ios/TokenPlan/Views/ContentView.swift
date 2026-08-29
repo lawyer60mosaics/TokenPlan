@@ -31,20 +31,20 @@ struct ContentView: View {
                 }
             }
             .navigationTitle("TokenPlan")
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button { showingSync = true } label: {
-                        Image(systemName: model.isSyncConfigured ? "icloud.fill" : "icloud")
-                    }
-                    .accessibilityLabel("云同步")
+            .navigationBarItems(
+                leading: Button {
+                    showingSync = true
+                } label: {
+                    Image(systemName: model.isSyncConfigured ? "icloud.fill" : "icloud")
                 }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { editingProfile = Profile() } label: {
-                        Image(systemName: "plus")
-                    }
-                    .accessibilityLabel("新增套餐")
+                .accessibilityLabel("云同步"),
+                trailing: Button {
+                    editingProfile = Profile()
+                } label: {
+                    Image(systemName: "plus")
                 }
-            }
+                .accessibilityLabel("新增套餐")
+            )
             .sheet(item: $editingProfile) { profile in
                 ProfileEditorView(profile: profile)
             }

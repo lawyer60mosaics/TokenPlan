@@ -25,7 +25,7 @@ struct VaultCrypto {
 
     func encrypt(_ plaintext: Data, recoveryKey: String) throws -> VaultEnvelope {
         let key = try decodeKey(recoveryKey)
-        guard let combined = sodium.aead.xchacha20poly1305ietf.encrypt(
+        guard let combined: [UInt8] = sodium.aead.xchacha20poly1305ietf.encrypt(
             message: Array(plaintext),
             secretKey: key,
             additionalData: Self.additionalData
