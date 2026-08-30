@@ -6,11 +6,13 @@ import WidgetKit
 @MainActor
 final class AppModel: ObservableObject {
     @Published var profiles: [Profile] = []
+    @Published var usageByProfile: [String: PlanUsage] = [:]
     @Published var username = ""
     @Published var password = ""
     @Published var revision: UInt64 = 0
     @Published var isSyncConfigured = false
     @Published var isBusy = false
+    @Published var isRefreshing = false
     @Published var isLiveActivityActive = false
     @Published var message = ""
     @Published var errorMessage = ""
@@ -25,6 +27,10 @@ final class AppModel: ObservableObject {
         self.defaults = defaults
         do {
             profiles = try profileStore.load()
+            let cached = WidgetSnapshotStore.load()
+            usageByProfile = Dictionary(uniqueKeysWithValues: cached.profiles
+                .filter { profile in profiles.contains(where: { $0.id == profile.id }) }
+                .map { ($0.id, $0.usage) })
             revision = UInt64(defaults.integer(forKey: "sync.revision"))
             username = try secretStore.read("username") ?? ""
             password = try secretStore.read("password") ?? ""
@@ -48,6 +54,7 @@ final class AppModel: ObservableObject {
                 profiles.append(profile)
             }
             try profileStore.save(profiles)
+            usageByProfile[profile.id] = usageByProfile[profile.id] ?? .waiting
             publishWidgetSnapshot()
             message = "已保存"
             if isSyncConfigured { await push() }
@@ -58,6 +65,8 @@ final class AppModel: ObservableObject {
 
     func delete(at offsets: IndexSet) async {
         profiles.remove(atOffsets: offsets)
+        let validIDs = Set(profiles.map(\.id))
+        usageByProfile = usageByProfile.filter { validIDs.contains($0.key) }
         do {
             try profileStore.save(profiles)
             publishWidgetSnapshot()
@@ -102,6 +111,8 @@ final class AppModel: ObservableObject {
             try profileStore.validate(downloaded)
             try profileStore.save(downloaded)
             profiles = downloaded
+            let validIDs = Set(downloaded.map(\.id))
+            usageByProfile = usageByProfile.filter { validIDs.contains($0.key) }
             publishWidgetSnapshot()
             setRevision(vault.revision)
             message = "已下载云端配置"
@@ -125,6 +136,56 @@ final class AppModel: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    func refreshAll() async {
+        guard !isRefreshing else { return }
+        isRefreshing = true
+        defer { isRefreshing = false }
+        let targets = profiles.filter(\.enabled)
+        for profile in profiles where !profile.enabled {
+            usageByProfile[profile.id] = PlanUsage(
+                status: .paused, tiers: [], balances: [], isAvailable: nil,
+                plan: nil, queriedAt: usageByProfile[profile.id]?.queriedAt, error: nil
+            )
+        }
+        await withTaskGroup(of: (String, PlanUsage?, String?).self) { group in
+            for profile in targets {
+                let previous = usageByProfile[profile.id] ?? .waiting
+                usageByProfile[profile.id] = PlanUsage(
+                    status: .loading,
+                    tiers: previous.tiers,
+                    balances: previous.balances,
+                    isAvailable: previous.isAvailable,
+                    plan: previous.plan,
+                    queriedAt: previous.queriedAt,
+                    error: nil
+                )
+                group.addTask {
+                    do { return (profile.id, try await UsageService().query(profile), nil) }
+                    catch { return (profile.id, nil, error.localizedDescription) }
+                }
+            }
+            publishWidgetSnapshot()
+            for await (id, usage, failure) in group {
+                if let usage {
+                    usageByProfile[id] = usage
+                } else {
+                    let previous = usageByProfile[id] ?? .waiting
+                    usageByProfile[id] = PlanUsage(
+                        status: .failed,
+                        tiers: previous.tiers,
+                        balances: previous.balances,
+                        isAvailable: previous.isAvailable,
+                        plan: previous.plan,
+                        queriedAt: previous.queriedAt,
+                        error: String((failure ?? "套餐查询失败").prefix(300))
+                    )
+                }
+                publishWidgetSnapshot()
+            }
+        }
+        message = "套餐用量已刷新"
     }
 
     func disableSync() {
@@ -212,7 +273,8 @@ final class AppModel: ObservableObject {
                     id: $0.id,
                     name: $0.name,
                     provider: Provider(rawValue: $0.provider)?.title ?? $0.provider,
-                    enabled: $0.enabled
+                    enabled: $0.enabled,
+                    usage: usageByProfile[$0.id] ?? .waiting
                 )
             },
             updatedAt: Date()
@@ -226,16 +288,37 @@ final class AppModel: ObservableObject {
     private func activityState(from snapshot: TokenPlanWidgetSnapshot? = nil) -> TokenPlanActivityAttributes.ContentState {
         let snapshot = snapshot ?? TokenPlanWidgetSnapshot(
             profiles: profiles.map {
-                WidgetProfileSummary(id: $0.id, name: $0.name, provider: $0.provider, enabled: $0.enabled)
+                WidgetProfileSummary(
+                    id: $0.id, name: $0.name, provider: $0.provider, enabled: $0.enabled,
+                    usage: usageByProfile[$0.id] ?? .waiting
+                )
             },
             updatedAt: Date()
         )
+        let primary = snapshot.profiles.first(where: { $0.enabled })
         return TokenPlanActivityAttributes.ContentState(
             enabledCount: snapshot.enabledCount,
             totalCount: snapshot.totalCount,
-            primaryName: snapshot.profiles.first(where: { $0.enabled })?.name ?? "尚无启用套餐",
+            primaryName: primary?.name ?? "尚无启用套餐",
+            primaryDetail: usageSummary(primary?.usage),
             updatedAt: snapshot.updatedAt
         )
+    }
+
+    private func usageSummary(_ usage: PlanUsage?) -> String {
+        guard let usage else { return "等待刷新" }
+        if let balance = usage.balances.first {
+            return "\(balance.currency) \(balance.totalBalance)"
+        }
+        if let tier = usage.tiers.first {
+            return "\(tier.title) \(Int(tier.utilization.rounded()))%"
+        }
+        switch usage.status {
+        case .loading: return "刷新中"
+        case .failed: return "刷新失败"
+        case .paused: return "已暂停"
+        default: return "等待刷新"
+        }
     }
 
     private func updateLiveActivities(with snapshot: TokenPlanWidgetSnapshot) {

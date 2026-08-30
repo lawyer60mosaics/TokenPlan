@@ -64,12 +64,18 @@ private struct TokenPlanHomeWidgetView: View {
         VStack(alignment: .leading, spacing: 8) {
             header
             Spacer()
-            Text("\(entry.snapshot.enabledCount)")
-                .font(.system(size: 44, weight: .bold, design: .rounded))
-                .minimumScaleFactor(0.7)
-            Text("个套餐已启用")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            if let profile = primaryProfile {
+                Text(profile.name).font(.caption.bold()).lineLimit(1)
+                Text(usageText(profile.usage))
+                    .font(.system(size: 27, weight: .bold, design: .rounded))
+                    .minimumScaleFactor(0.65)
+                    .lineLimit(1)
+                if let utilization = profile.usage.tiers.first?.utilization {
+                    ProgressView(value: min(max(utilization, 0), 100), total: 100).tint(.indigo)
+                }
+            } else {
+                Text("尚无启用套餐").font(.caption).foregroundStyle(.secondary)
+            }
         }
         .padding()
     }
@@ -87,10 +93,14 @@ private struct TokenPlanHomeWidgetView: View {
             Divider()
             VStack(alignment: .leading, spacing: 7) {
                 ForEach(entry.snapshot.profiles.prefix(3)) { profile in
-                    Label(profile.name, systemImage: profile.enabled ? "bolt.circle.fill" : "pause.circle")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(profile.enabled ? .primary : .secondary)
-                        .lineLimit(1)
+                    HStack {
+                        Label(profile.name, systemImage: profile.enabled ? "bolt.circle.fill" : "pause.circle")
+                            .lineLimit(1)
+                        Spacer()
+                        Text(usageText(profile.usage)).foregroundStyle(.secondary)
+                    }
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(profile.enabled ? .primary : .secondary)
                 }
                 if entry.snapshot.profiles.isEmpty {
                     Text("尚无套餐").font(.caption).foregroundStyle(.secondary)
@@ -122,7 +132,7 @@ private struct TokenPlanHomeWidgetView: View {
                         Text(profile.provider).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                     }
                     Spacer()
-                    Text(profile.enabled ? "启用" : "暂停")
+                    Text(profile.enabled ? usageText(profile.usage) : "暂停")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -133,6 +143,25 @@ private struct TokenPlanHomeWidgetView: View {
                 .foregroundStyle(.secondary)
         }
         .padding()
+    }
+
+    private var primaryProfile: WidgetProfileSummary? {
+        entry.snapshot.profiles.first(where: { $0.enabled })
+    }
+
+    private func usageText(_ usage: PlanUsage) -> String {
+        if !usage.balances.isEmpty {
+            return usage.balances.prefix(2).map { "\($0.currency) \($0.totalBalance)" }.joined(separator: " · ")
+        }
+        if !usage.tiers.isEmpty {
+            return usage.tiers.prefix(3).map { "\($0.title) \(Int($0.utilization.rounded()))%" }.joined(separator: " · ")
+        }
+        switch usage.status {
+        case .loading: return "刷新中"
+        case .failed: return "失败"
+        case .paused: return "暂停"
+        default: return "等待"
+        }
     }
 }
 
@@ -156,24 +185,32 @@ private struct TokenPlanLockScreenView: View {
     var body: some View {
         switch family {
         case .accessoryCircular:
-            Gauge(value: Double(entry.snapshot.enabledCount), in: 0...Double(max(entry.snapshot.totalCount, 1))) {
+            Gauge(value: primaryUtilization, in: 0...100) {
                 Image(systemName: "key.horizontal")
             } currentValueLabel: {
-                Text("\(entry.snapshot.enabledCount)")
+                Text("\(Int(primaryUtilization.rounded()))")
             }
             .gaugeStyle(.accessoryCircularCapacity)
         case .accessoryRectangular:
             VStack(alignment: .leading, spacing: 2) {
                 Label("TokenPlan", systemImage: "key.horizontal.fill").font(.headline)
-                Text("\(entry.snapshot.enabledCount) / \(entry.snapshot.totalCount) 个套餐启用")
+                Text(primarySummary)
                     .font(.caption)
                 Text(entry.snapshot.profiles.first(where: { $0.enabled })?.name ?? "尚无启用套餐")
                     .font(.caption2)
                     .lineLimit(1)
             }
         default:
-            Label("TokenPlan：\(entry.snapshot.enabledCount) 个套餐启用", systemImage: "key.horizontal.fill")
+            Label("TokenPlan：\(primarySummary)", systemImage: "key.horizontal.fill")
         }
+    }
+
+    private var primary: WidgetProfileSummary? { entry.snapshot.profiles.first(where: { $0.enabled }) }
+    private var primaryUtilization: Double { min(max(primary?.usage.tiers.first?.utilization ?? 0, 0), 100) }
+    private var primarySummary: String {
+        if let balance = primary?.usage.balances.first { return "\(balance.currency) \(balance.totalBalance)" }
+        if let tier = primary?.usage.tiers.first { return "\(primary?.name ?? "套餐") \(Int(tier.utilization.rounded()))%" }
+        return primary?.name ?? "尚无启用套餐"
     }
 }
 
@@ -189,7 +226,7 @@ struct TokenPlanLiveActivityWidget: Widget {
                     Text("TokenPlan").font(.headline)
                     Text("\(context.state.enabledCount) / \(context.state.totalCount) 个套餐启用")
                         .font(.subheadline)
-                    Text(context.state.primaryName).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Text("\(context.state.primaryName) · \(context.state.primaryDetail)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer()
             }
@@ -203,12 +240,11 @@ struct TokenPlanLiveActivityWidget: Widget {
                         .font(.headline)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    Text("\(context.state.enabledCount)/\(context.state.totalCount)")
-                        .font(.title3.bold())
+                    Text(context.state.primaryDetail).font(.caption.bold()).lineLimit(1)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     HStack {
-                        Text(context.state.primaryName).lineLimit(1)
+                        Text("\(context.state.primaryName) · \(context.state.primaryDetail)").lineLimit(1)
                         Spacer()
                         Text(context.state.updatedAt, style: .relative).foregroundStyle(.secondary)
                     }
@@ -217,7 +253,7 @@ struct TokenPlanLiveActivityWidget: Widget {
             } compactLeading: {
                 Image(systemName: "key.horizontal.fill")
             } compactTrailing: {
-                Text("\(context.state.enabledCount)").font(.caption.bold())
+                Text(context.state.primaryDetail).font(.caption2.bold()).lineLimit(1)
             } minimal: {
                 Image(systemName: "key.horizontal.fill")
             }

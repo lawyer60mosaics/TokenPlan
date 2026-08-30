@@ -27,7 +27,7 @@ struct ContentView: View {
                             Button {
                                 editingProfile = profile
                             } label: {
-                                ProfileRow(profile: profile)
+                                ProfileRow(profile: profile, usage: model.usageByProfile[profile.id] ?? .waiting)
                             }
                             .buttonStyle(.plain)
                         }
@@ -45,12 +45,21 @@ struct ContentView: View {
                     Image(systemName: model.isSyncConfigured ? "icloud.fill" : "icloud")
                 }
                 .accessibilityLabel("云同步"),
-                trailing: Button {
-                    editingProfile = Profile()
-                } label: {
-                    Image(systemName: "plus")
+                trailing: HStack {
+                    Button {
+                        Task { await model.refreshAll() }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .disabled(model.isRefreshing)
+                    .accessibilityLabel("刷新套餐用量")
+                    Button {
+                        editingProfile = Profile()
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .accessibilityLabel("新增套餐")
                 }
-                .accessibilityLabel("新增套餐")
             )
             .sheet(item: $editingProfile) { profile in
                 ProfileEditorView(profile: profile)
@@ -62,30 +71,88 @@ struct ContentView: View {
                 StatusBanner(message: model.errorMessage.isEmpty ? model.message : model.errorMessage,
                              isError: !model.errorMessage.isEmpty)
             }
+            .refreshable { await model.refreshAll() }
+            .task {
+                await model.refreshAll()
+                while !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: 60_000_000_000)
+                    if !Task.isCancelled { await model.refreshAll() }
+                }
+            }
         }
     }
 }
 
 private struct ProfileRow: View {
     let profile: Profile
+    let usage: PlanUsage
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(alignment: .top, spacing: 12) {
             Image(systemName: profile.enabled ? "bolt.circle.fill" : "pause.circle")
                 .font(.title2)
                 .foregroundStyle(profile.enabled ? .blue : .secondary)
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 5) {
                 Text(profile.name).font(.headline)
-                Text(Provider(rawValue: profile.provider)?.title ?? profile.provider)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                HStack {
+                    Text(Provider(rawValue: profile.provider)?.title ?? profile.provider)
+                    Spacer()
+                    Text(statusText).foregroundStyle(statusColor)
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                ForEach(usage.tiers.prefix(3)) { tier in
+                    VStack(spacing: 2) {
+                        HStack {
+                            Text(tier.title)
+                            Spacer()
+                            Text("\(Int(tier.utilization.rounded()))%")
+                        }
+                        .font(.caption2)
+                        ProgressView(value: min(max(tier.utilization, 0), 100), total: 100)
+                            .tint(tier.utilization >= 90 ? .red : .blue)
+                        if let reset = tier.resetsAt {
+                            Text("重置：\(reset)")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(1)
+                        }
+                    }
+                }
+                ForEach(usage.balances) { balance in
+                    HStack {
+                        Text(balance.currency)
+                        Spacer()
+                        Text(balance.totalBalance).fontWeight(.semibold)
+                    }
+                    .font(.caption2)
+                    Text("赠送 \(balance.grantedBalance) · 充值 \(balance.toppedUpBalance)")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.tertiary)
+                }
+                if let error = usage.error, usage.tiers.isEmpty, usage.balances.isEmpty {
+                    Text(error).font(.caption2).foregroundStyle(.red).lineLimit(2)
+                }
             }
-            Spacer()
             Image(systemName: "chevron.right")
                 .font(.caption.bold())
                 .foregroundStyle(.tertiary)
         }
         .contentShape(Rectangle())
+    }
+
+    private var statusText: String {
+        switch usage.status {
+        case .success: return usage.plan ?? "已更新"
+        case .loading: return "刷新中…"
+        case .failed: return "刷新失败"
+        case .paused: return "已暂停"
+        case .waiting: return "等待刷新"
+        }
+    }
+
+    private var statusColor: Color {
+        usage.status == .failed ? .red : .secondary
     }
 }
 

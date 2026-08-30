@@ -55,7 +55,7 @@ Backend parsing and local HTTP contract tests do not prove a real account can ac
 
 ## iOS
 
-`ios/` contains the native SwiftUI client, home-screen widgets in small/medium/large sizes, lock-screen widgets, and a Live Activity with Dynamic Island layouts. The cloud server address is built into both clients; users enter only an account and password. Both clients derive separate authentication and vault keys, then use XChaCha20-Poly1305 with a 24-byte nonce, URL-safe Base64 and the `tokenplan-vault-v2` authenticated-data value. The account and password are stored with Windows DPAPI or iOS Keychain; decrypted iOS profiles use Complete File Protection.
+`ios/` contains the native SwiftUI client with the same eight provider usage queries as Windows, home-screen widgets in small/medium/large sizes, lock-screen widgets, and a Live Activity with Dynamic Island layouts. Foreground usage refresh runs every 60 seconds; background refresh uses iOS `BGAppRefresh` scheduling. The cloud server address is built into both clients; users enter only an account and password. Both clients derive separate authentication and vault keys, then use XChaCha20-Poly1305 with a 24-byte nonce, URL-safe Base64 and the `tokenplan-vault-v2` authenticated-data value. The account and password are stored with Windows DPAPI or iOS Keychain; decrypted iOS profiles use Complete File Protection.
 
 Run the **Build iOS IPA** GitHub Actions workflow to compile on a macOS runner. With no Apple signing secrets, the artifact is `TokenPlan-unsigned.ipa`, intended for signing with a sideloading tool. Direct device installation, Ad Hoc distribution and TestFlight still require an Apple Developer certificate and provisioning profile. See [ios/README.md](ios/README.md).
 

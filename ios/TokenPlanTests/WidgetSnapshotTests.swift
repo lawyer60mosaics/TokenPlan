@@ -5,8 +5,8 @@ final class WidgetSnapshotTests: XCTestCase {
     func testCountsAndRoundTrip() throws {
         let snapshot = TokenPlanWidgetSnapshot(
             profiles: [
-                WidgetProfileSummary(id: "one", name: "One", provider: "Kimi", enabled: true),
-                WidgetProfileSummary(id: "two", name: "Two", provider: "DeepSeek", enabled: false),
+                WidgetProfileSummary(id: "one", name: "One", provider: "Kimi", enabled: true, usage: .waiting),
+                WidgetProfileSummary(id: "two", name: "Two", provider: "DeepSeek", enabled: false, usage: .waiting),
             ],
             updatedAt: Date(timeIntervalSince1970: 123)
         )
@@ -18,7 +18,7 @@ final class WidgetSnapshotTests: XCTestCase {
 
     func testSnapshotDoesNotContainCredentials() throws {
         let snapshot = TokenPlanWidgetSnapshot(
-            profiles: [WidgetProfileSummary(id: "one", name: "Kimi", provider: "Kimi", enabled: true)],
+            profiles: [WidgetProfileSummary(id: "one", name: "Kimi", provider: "Kimi", enabled: true, usage: .waiting)],
             updatedAt: Date()
         )
         let encoded = String(decoding: try JSONEncoder().encode(snapshot), as: UTF8.self)

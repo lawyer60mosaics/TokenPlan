@@ -1,6 +1,6 @@
 import Foundation
 
-enum Provider: String, CaseIterable, Identifiable, Codable {
+enum Provider: String, CaseIterable, Identifiable, Codable, Sendable {
     case volcengine
     case kimi
     case zhipu
@@ -26,7 +26,7 @@ enum Provider: String, CaseIterable, Identifiable, Codable {
     }
 }
 
-struct Profile: Codable, Identifiable, Equatable {
+struct Profile: Codable, Identifiable, Equatable, Sendable {
     var id: String
     var name: String
     var provider: String
