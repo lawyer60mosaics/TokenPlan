@@ -7,7 +7,10 @@ struct TokenPlanActivityAttributes: ActivityAttributes, Sendable {
         let enabledCount: Int
         let totalCount: Int
         let primaryName: String
+        let primaryMetricTitle: String
         let primaryDetail: String
+        let secondaryDetail: String
+        let primaryProgress: Double
         let updatedAt: Date
     }
 

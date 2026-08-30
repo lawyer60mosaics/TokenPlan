@@ -14,6 +14,10 @@ struct TokenPlanWidgetSnapshot: Codable, Hashable, Sendable {
 
     var enabledCount: Int { profiles.filter(\.enabled).count }
     var totalCount: Int { profiles.count }
+    var enabledProfiles: [WidgetProfileSummary] { profiles.filter(\.enabled) }
+    var featuredProfile: WidgetProfileSummary? {
+        enabledProfiles.first(where: { $0.usage.hasDetails }) ?? enabledProfiles.first
+    }
 
     static let empty = TokenPlanWidgetSnapshot(profiles: [], updatedAt: .distantPast)
 
@@ -37,7 +41,20 @@ struct TokenPlanWidgetSnapshot: Codable, Hashable, Sendable {
 
 enum WidgetSnapshotStore {
     static let appGroup = "group.com.xuwenxu.tokenplan"
-    private static let snapshotKey = "widget.snapshot.v1"
+    private static let snapshotKey = "widget.snapshot.v2"
+    private static let legacySnapshotKey = "widget.snapshot.v1"
+
+    private struct LegacyProfile: Codable {
+        let id: String
+        let name: String
+        let provider: String
+        let enabled: Bool
+    }
+
+    private struct LegacySnapshot: Codable {
+        let profiles: [LegacyProfile]
+        let updatedAt: Date
+    }
 
     static func save(_ snapshot: TokenPlanWidgetSnapshot) throws {
         guard let defaults = UserDefaults(suiteName: appGroup) else {
@@ -47,11 +64,34 @@ enum WidgetSnapshotStore {
     }
 
     static func load() -> TokenPlanWidgetSnapshot {
-        guard let defaults = UserDefaults(suiteName: appGroup),
-              let data = defaults.data(forKey: snapshotKey),
-              let snapshot = try? JSONDecoder().decode(TokenPlanWidgetSnapshot.self, from: data) else {
-            return .empty
+        guard let defaults = UserDefaults(suiteName: appGroup) else { return .empty }
+        if let data = defaults.data(forKey: snapshotKey), let snapshot = decode(data) {
+            return snapshot
         }
-        return snapshot
+        if let data = defaults.data(forKey: legacySnapshotKey), let snapshot = decode(data) {
+            return snapshot
+        }
+        return .empty
+    }
+
+    static func decode(_ data: Data) -> TokenPlanWidgetSnapshot? {
+        if let snapshot = try? JSONDecoder().decode(TokenPlanWidgetSnapshot.self, from: data) {
+            return snapshot
+        }
+        guard let legacy = try? JSONDecoder().decode(LegacySnapshot.self, from: data) else {
+            return nil
+        }
+        return TokenPlanWidgetSnapshot(
+            profiles: legacy.profiles.map {
+                WidgetProfileSummary(
+                    id: $0.id,
+                    name: $0.name,
+                    provider: $0.provider,
+                    enabled: $0.enabled,
+                    usage: .waiting
+                )
+            },
+            updatedAt: legacy.updatedAt
+        )
     }
 }

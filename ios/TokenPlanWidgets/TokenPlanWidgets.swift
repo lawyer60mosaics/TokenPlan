@@ -2,23 +2,24 @@ import ActivityKit
 import SwiftUI
 import WidgetKit
 
-struct TokenPlanEntry: TimelineEntry {
+struct TokenPlanEntry: TimelineEntry, Sendable {
     let date: Date
     let snapshot: TokenPlanWidgetSnapshot
 }
 
 struct TokenPlanProvider: TimelineProvider {
     func placeholder(in context: Context) -> TokenPlanEntry {
-        TokenPlanEntry(date: Date(), snapshot: .placeholder)
+        TokenPlanEntry(date: .now, snapshot: .placeholder)
     }
 
     func getSnapshot(in context: Context, completion: @escaping (TokenPlanEntry) -> Void) {
-        completion(TokenPlanEntry(date: Date(), snapshot: context.isPreview ? .placeholder : WidgetSnapshotStore.load()))
+        completion(TokenPlanEntry(date: .now, snapshot: context.isPreview ? .placeholder : WidgetSnapshotStore.load()))
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<TokenPlanEntry>) -> Void) {
-        let entry = TokenPlanEntry(date: Date(), snapshot: WidgetSnapshotStore.load())
-        completion(Timeline(entries: [entry], policy: .never))
+        let entry = TokenPlanEntry(date: .now, snapshot: WidgetSnapshotStore.load())
+        let nextCheck = Calendar.current.date(byAdding: .minute, value: 15, to: .now) ?? .now.addingTimeInterval(900)
+        completion(Timeline(entries: [entry], policy: .after(nextCheck)))
     }
 }
 
@@ -29,9 +30,10 @@ struct TokenPlanHomeWidget: Widget {
         StaticConfiguration(kind: kind, provider: TokenPlanProvider()) { entry in
             TokenPlanHomeWidgetView(entry: entry)
                 .tokenPlanWidgetBackground()
+                .widgetURL(URL(string: "tokenplan://plans"))
         }
         .configurationDisplayName("TokenPlan 套餐")
-        .description("在桌面查看已启用套餐。")
+        .description("显示套餐窗口、用量、余额和重置时间。")
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
     }
 }
@@ -41,127 +43,245 @@ private struct TokenPlanHomeWidgetView: View {
     let entry: TokenPlanEntry
 
     var body: some View {
-        switch family {
-        case .systemSmall:
-            small
-        case .systemMedium:
-            medium
-        default:
-            large
+        Group {
+            if entry.snapshot.profiles.isEmpty {
+                WidgetEmptyView()
+            } else {
+                switch family {
+                case .systemSmall: SmallPlanWidget(profile: entry.snapshot.featuredProfile)
+                case .systemMedium: MediumPlanWidget(snapshot: entry.snapshot)
+                default: LargePlanWidget(snapshot: entry.snapshot)
+                }
+            }
         }
+        .accessibilityElement(children: .combine)
     }
+}
 
-    private var header: some View {
+private struct WidgetHeader: View {
+    let updatedAt: Date?
+
+    var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: "key.horizontal.fill")
-                .foregroundStyle(.indigo)
-            Text("TokenPlan").font(.headline)
-            Spacer()
+            ZStack {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(LinearGradient(colors: [.indigo, .purple], startPoint: .topLeading, endPoint: .bottomTrailing))
+                Image(systemName: "chart.bar.fill")
+                    .font(.caption2.bold())
+                    .foregroundStyle(.white)
+            }
+            .frame(width: 24, height: 24)
+            Text("TokenPlan").font(.caption.bold())
+            Spacer(minLength: 4)
+            if let updatedAt, updatedAt > .distantPast {
+                Text(updatedAt, style: .time)
+                    .font(.system(size: 9, weight: .medium, design: .rounded))
+                    .foregroundStyle(.secondary)
+            }
         }
     }
+}
 
-    private var small: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            header
-            Spacer()
-            if let profile = primaryProfile {
-                Text(profile.name).font(.caption.bold()).lineLimit(1)
-                Text(usageText(profile.usage))
-                    .font(.system(size: 27, weight: .bold, design: .rounded))
-                    .minimumScaleFactor(0.65)
-                    .lineLimit(1)
-                if let utilization = profile.usage.tiers.first?.utilization {
-                    ProgressView(value: min(max(utilization, 0), 100), total: 100).tint(.indigo)
+private struct SmallPlanWidget: View {
+    let profile: WidgetProfileSummary?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            WidgetHeader(updatedAt: profile?.usage.queriedAt)
+            if let profile {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(profile.name).font(.caption.weight(.semibold)).lineLimit(1)
+                    Text(profile.provider).font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                if let tier = profile.usage.primaryTier {
+                    HStack(alignment: .lastTextBaseline, spacing: 4) {
+                        Text(tier.percentageText)
+                            .font(.system(size: 32, weight: .bold, design: .rounded))
+                            .monospacedDigit()
+                            .minimumScaleFactor(0.8)
+                        Text("已使用").font(.system(size: 9)).foregroundStyle(.secondary)
+                    }
+                    Text(tier.title).font(.caption2.weight(.semibold))
+                    ProgressView(value: tier.clampedUtilization, total: 100)
+                        .tint(metricColor(tier.clampedUtilization))
+                    if let reset = tier.resetText {
+                        Text(reset).font(.system(size: 8)).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                } else if let balance = profile.usage.balances.first {
+                    Text(balance.totalBalance)
+                        .font(.system(size: 30, weight: .bold, design: .rounded))
+                        .minimumScaleFactor(0.7)
+                        .lineLimit(1)
+                    Text("\(balance.currency) 可用余额").font(.caption2.weight(.semibold))
+                } else {
+                    WidgetStatusView(usage: profile.usage)
                 }
             } else {
-                Text("尚无启用套餐").font(.caption).foregroundStyle(.secondary)
+                WidgetStatusView(usage: .waiting)
             }
         }
-        .padding()
+        .padding(14)
+    }
+}
+
+private struct MediumPlanWidget: View {
+    let snapshot: TokenPlanWidgetSnapshot
+
+    private var displayedProfiles: [WidgetProfileSummary] {
+        Array(snapshot.enabledProfiles.prefix(2))
     }
 
-    private var medium: some View {
-        HStack(spacing: 18) {
-            VStack(alignment: .leading, spacing: 7) {
-                header
-                Text("\(entry.snapshot.enabledCount) / \(entry.snapshot.totalCount)")
-                    .font(.system(size: 32, weight: .bold, design: .rounded))
-                Text("启用 / 全部套餐")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Divider()
-            VStack(alignment: .leading, spacing: 7) {
-                ForEach(entry.snapshot.profiles.prefix(3)) { profile in
-                    HStack {
-                        Label(profile.name, systemImage: profile.enabled ? "bolt.circle.fill" : "pause.circle")
-                            .lineLimit(1)
-                        Spacer()
-                        Text(usageText(profile.usage)).foregroundStyle(.secondary)
-                    }
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(profile.enabled ? .primary : .secondary)
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            WidgetHeader(updatedAt: snapshot.updatedAt)
+            HStack(spacing: 10) {
+                ForEach(displayedProfiles) { profile in
+                    WidgetPlanColumn(profile: profile)
+                    if profile.id != displayedProfiles.last?.id { Divider() }
                 }
-                if entry.snapshot.profiles.isEmpty {
-                    Text("尚无套餐").font(.caption).foregroundStyle(.secondary)
+                if snapshot.enabledProfiles.isEmpty {
+                    WidgetStatusView(usage: .waiting)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding()
+        .padding(14)
     }
+}
 
-    private var large: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            header
-            HStack(alignment: .firstTextBaseline) {
-                Text("\(entry.snapshot.enabledCount)")
-                    .font(.system(size: 38, weight: .bold, design: .rounded))
-                Text("/ \(entry.snapshot.totalCount) 个套餐已启用")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                Spacer()
-            }
-            Divider()
-            ForEach(entry.snapshot.profiles.prefix(6)) { profile in
-                HStack(spacing: 9) {
-                    Image(systemName: profile.enabled ? "bolt.circle.fill" : "pause.circle")
-                        .foregroundStyle(profile.enabled ? .indigo : .secondary)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(profile.name).font(.subheadline.weight(.semibold)).lineLimit(1)
-                        Text(profile.provider).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+private struct WidgetPlanColumn: View {
+    let profile: WidgetProfileSummary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(profile.name).font(.caption.bold()).lineLimit(1)
+            Text(profile.usage.plan ?? profile.provider)
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            if !profile.usage.tiers.isEmpty {
+                ForEach(profile.usage.tiers.prefix(2)) { tier in
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack {
+                            Text(tier.title).lineLimit(1)
+                            Spacer(minLength: 4)
+                            Text(tier.percentageText).bold().monospacedDigit()
+                        }
+                        .font(.system(size: 10))
+                        ProgressView(value: tier.clampedUtilization, total: 100)
+                            .tint(metricColor(tier.clampedUtilization))
                     }
-                    Spacer()
-                    Text(profile.enabled ? usageText(profile.usage) : "暂停")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
                 }
+            } else if let balance = profile.usage.balances.first {
+                Text(balance.totalBalance)
+                    .font(.system(size: 24, weight: .bold, design: .rounded))
+                    .minimumScaleFactor(0.7)
+                    .lineLimit(1)
+                Text("\(balance.currency) 余额").font(.caption2).foregroundStyle(.secondary)
+            } else {
+                WidgetStatusView(usage: profile.usage)
             }
             Spacer(minLength: 0)
-            Text(entry.snapshot.updatedAt, style: .relative)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct LargePlanWidget: View {
+    let snapshot: TokenPlanWidgetSnapshot
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 11) {
+            WidgetHeader(updatedAt: snapshot.updatedAt)
+            HStack(alignment: .firstTextBaseline) {
+                Text("套餐用量")
+                    .font(.title3.bold())
+                Spacer()
+                Text("\(snapshot.enabledCount) 个启用")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(snapshot.enabledProfiles.prefix(4)) { profile in
+                LargePlanRow(profile: profile)
+            }
+            if snapshot.enabledProfiles.isEmpty {
+                WidgetStatusView(usage: .waiting)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+    }
+}
+
+private struct LargePlanRow: View {
+    let profile: WidgetProfileSummary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack {
+                Circle()
+                    .fill(profile.usage.status == .failed ? Color.orange : Color.indigo)
+                    .frame(width: 7, height: 7)
+                Text(profile.name).font(.caption.bold()).lineLimit(1)
+                Text(profile.usage.plan ?? profile.provider)
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer()
+                Text(profile.usage.headline)
+                    .font(.caption2.bold())
+                    .monospacedDigit()
+            }
+            if !profile.usage.tiers.isEmpty {
+                HStack(spacing: 8) {
+                    ForEach(profile.usage.tiers.prefix(3)) { tier in
+                        HStack(spacing: 3) {
+                            Text(tier.title).foregroundStyle(.secondary)
+                            Text(tier.percentageText).bold().monospacedDigit()
+                        }
+                        .font(.system(size: 9))
+                    }
+                }
+                if let tier = profile.usage.primaryTier {
+                    ProgressView(value: tier.clampedUtilization, total: 100)
+                        .tint(metricColor(tier.clampedUtilization))
+                }
+            } else if let balance = profile.usage.balances.first {
+                Text("赠送 \(balance.grantedBalance) · 充值 \(balance.toppedUpBalance)")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+private struct WidgetStatusView: View {
+    let usage: PlanUsage
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: usage.status == .failed ? "exclamationmark.triangle.fill" : "arrow.clockwise.circle")
+            Text(usage.headline)
+        }
+        .font(.caption.weight(.medium))
+        .foregroundStyle(usage.status == .failed ? .orange : .secondary)
+    }
+}
+
+private struct WidgetEmptyView: View {
+    var body: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "chart.bar.xaxis")
+                .font(.title)
+                .foregroundStyle(.indigo)
+            Text("尚无套餐").font(.headline)
+            Text("打开 TokenPlan 添加或同步套餐")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
         }
         .padding()
-    }
-
-    private var primaryProfile: WidgetProfileSummary? {
-        entry.snapshot.profiles.first(where: { $0.enabled })
-    }
-
-    private func usageText(_ usage: PlanUsage) -> String {
-        if !usage.balances.isEmpty {
-            return usage.balances.prefix(2).map { "\($0.currency) \($0.totalBalance)" }.joined(separator: " · ")
-        }
-        if !usage.tiers.isEmpty {
-            return usage.tiers.prefix(3).map { "\($0.title) \(Int($0.utilization.rounded()))%" }.joined(separator: " · ")
-        }
-        switch usage.status {
-        case .loading: return "刷新中"
-        case .failed: return "失败"
-        case .paused: return "暂停"
-        default: return "等待"
-        }
     }
 }
 
@@ -171,9 +291,10 @@ struct TokenPlanLockScreenWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: TokenPlanProvider()) { entry in
             TokenPlanLockScreenView(entry: entry)
+                .widgetURL(URL(string: "tokenplan://plans"))
         }
         .configurationDisplayName("TokenPlan 锁屏")
-        .description("在锁屏上查看套餐状态。")
+        .description("在锁屏上清晰查看套餐名称、窗口和用量。")
         .supportedFamilies([.accessoryCircular, .accessoryRectangular, .accessoryInline])
     }
 }
@@ -182,35 +303,72 @@ private struct TokenPlanLockScreenView: View {
     @Environment(\.widgetFamily) private var family
     let entry: TokenPlanEntry
 
+    private var primary: WidgetProfileSummary? { entry.snapshot.featuredProfile }
+    private var tier: PlanUsageTier? { primary?.usage.primaryTier }
+
     var body: some View {
         switch family {
         case .accessoryCircular:
-            Gauge(value: primaryUtilization, in: 0...100) {
-                Image(systemName: "key.horizontal")
+            Gauge(value: tier?.clampedUtilization ?? 0, in: 0...100) {
+                Image(systemName: "chart.bar.fill")
             } currentValueLabel: {
-                Text("\(Int(primaryUtilization.rounded()))")
+                if let tier {
+                    Text("\(Int(tier.clampedUtilization.rounded()))")
+                        .font(.system(.headline, design: .rounded, weight: .bold))
+                } else {
+                    Image(systemName: "minus")
+                }
             }
             .gaugeStyle(.accessoryCircularCapacity)
+            .accessibilityLabel(circularAccessibilityLabel)
+
         case .accessoryRectangular:
-            VStack(alignment: .leading, spacing: 2) {
-                Label("TokenPlan", systemImage: "key.horizontal.fill").font(.headline)
-                Text(primarySummary)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 5) {
+                    Image(systemName: "chart.bar.fill")
+                    Text(primary?.name ?? "TokenPlan").font(.headline).lineLimit(1)
+                    Spacer(minLength: 2)
+                    if primary?.usage.status == .failed {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                    }
+                }
+                if let primary, !primary.usage.tiers.isEmpty {
+                    HStack(spacing: 10) {
+                        ForEach(primary.usage.tiers.prefix(2)) { tier in
+                            HStack(spacing: 3) {
+                                Text(tier.title).foregroundStyle(.secondary)
+                                Text(tier.percentageText).bold().monospacedDigit()
+                            }
+                        }
+                    }
                     .font(.caption)
-                Text(entry.snapshot.profiles.first(where: { $0.enabled })?.name ?? "尚无启用套餐")
-                    .font(.caption2)
-                    .lineLimit(1)
+                    if let reset = primary.usage.primaryTier?.resetText {
+                        Text(reset).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                } else if let balance = primary?.usage.balances.first {
+                    Text("\(balance.currency) 余额  \(balance.totalBalance)")
+                        .font(.subheadline.bold()).monospacedDigit()
+                } else {
+                    Text(primary?.usage.headline ?? "打开 App 添加套餐")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
+            .accessibilityElement(children: .combine)
+
         default:
-            Label("TokenPlan：\(primarySummary)", systemImage: "key.horizontal.fill")
+            Label(inlineSummary, systemImage: "chart.bar.fill")
         }
     }
 
-    private var primary: WidgetProfileSummary? { entry.snapshot.profiles.first(where: { $0.enabled }) }
-    private var primaryUtilization: Double { min(max(primary?.usage.tiers.first?.utilization ?? 0, 0), 100) }
-    private var primarySummary: String {
-        if let balance = primary?.usage.balances.first { return "\(balance.currency) \(balance.totalBalance)" }
-        if let tier = primary?.usage.tiers.first { return "\(primary?.name ?? "套餐") \(Int(tier.utilization.rounded()))%" }
-        return primary?.name ?? "尚无启用套餐"
+    private var inlineSummary: String {
+        guard let primary else { return "TokenPlan 尚无套餐" }
+        let detail = primary.usage.compactDetail.isEmpty ? primary.usage.headline : primary.usage.compactDetail
+        return "\(primary.name) · \(detail)"
+    }
+
+    private var circularAccessibilityLabel: String {
+        guard let primary, let tier else { return "TokenPlan 尚无套餐用量" }
+        return "\(primary.name)，\(tier.title)，已使用 \(tier.percentageText)"
     }
 }
 
@@ -218,57 +376,95 @@ private struct TokenPlanLockScreenView: View {
 struct TokenPlanLiveActivityWidget: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: TokenPlanActivityAttributes.self) { context in
-            HStack(spacing: 12) {
-                Image(systemName: "key.horizontal.fill")
-                    .font(.title2)
-                    .foregroundStyle(.indigo)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("TokenPlan").font(.headline)
-                    Text("\(context.state.enabledCount) / \(context.state.totalCount) 个套餐启用")
-                        .font(.subheadline)
-                    Text("\(context.state.primaryName) · \(context.state.primaryDetail)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Label("TokenPlan", systemImage: "chart.bar.fill").font(.headline)
+                    Spacer()
+                    Text(context.state.updatedAt, style: .relative)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
-                Spacer()
+                HStack(alignment: .lastTextBaseline) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(context.state.primaryName).font(.subheadline.bold()).lineLimit(1)
+                        Text(context.state.primaryMetricTitle).font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Text(context.state.primaryDetail)
+                        .font(.system(.title2, design: .rounded, weight: .bold))
+                        .monospacedDigit()
+                }
+                if context.state.primaryProgress > 0 {
+                    ProgressView(value: context.state.primaryProgress).tint(.indigo)
+                }
+                Text(context.state.secondaryDetail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             .padding()
-            .activityBackgroundTint(Color.indigo.opacity(0.12))
+            .activityBackgroundTint(Color.indigo.opacity(0.10))
             .activitySystemActionForegroundColor(.indigo)
+            .accessibilityElement(children: .combine)
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    Label("TokenPlan", systemImage: "key.horizontal.fill")
-                        .font(.headline)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Label("TokenPlan", systemImage: "chart.bar.fill").font(.caption.bold())
+                        Text(context.state.primaryName).font(.caption2).lineLimit(1)
+                    }
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    Text(context.state.primaryDetail).font(.caption.bold()).lineLimit(1)
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(context.state.primaryDetail)
+                            .font(.title3.bold()).monospacedDigit()
+                        Text(context.state.primaryMetricTitle)
+                            .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    }
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    HStack {
-                        Text("\(context.state.primaryName) · \(context.state.primaryDetail)").lineLimit(1)
-                        Spacer()
-                        Text(context.state.updatedAt, style: .relative).foregroundStyle(.secondary)
+                    VStack(spacing: 5) {
+                        if context.state.primaryProgress > 0 {
+                            ProgressView(value: context.state.primaryProgress).tint(.indigo)
+                        }
+                        HStack {
+                            Text(context.state.secondaryDetail).lineLimit(1)
+                            Spacer()
+                            Text(context.state.updatedAt, style: .relative).foregroundStyle(.secondary)
+                        }
+                        .font(.caption2)
                     }
-                    .font(.caption)
                 }
             } compactLeading: {
-                Image(systemName: "key.horizontal.fill")
+                Image(systemName: "chart.bar.fill")
             } compactTrailing: {
-                Text(context.state.primaryDetail).font(.caption2.bold()).lineLimit(1)
+                Text(context.state.primaryDetail)
+                    .font(.caption2.bold()).monospacedDigit().lineLimit(1)
             } minimal: {
-                Image(systemName: "key.horizontal.fill")
+                Image(systemName: "chart.bar.fill")
             }
             .keylineTint(.indigo)
         }
     }
 }
 
+private func metricColor(_ utilization: Double) -> Color {
+    if utilization >= 90 { return .red }
+    if utilization >= 70 { return .orange }
+    return .indigo
+}
+
 private extension View {
     @ViewBuilder
     func tokenPlanWidgetBackground() -> some View {
         if #available(iOSApplicationExtension 17.0, *) {
-            containerBackground(Color.indigo.opacity(0.12), for: .widget)
+            containerBackground(
+                LinearGradient(
+                    colors: [Color.indigo.opacity(0.13), Color.purple.opacity(0.05)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                ),
+                for: .widget
+            )
         } else {
-            background(Color.indigo.opacity(0.12))
+            background(Color.indigo.opacity(0.10))
         }
     }
 }

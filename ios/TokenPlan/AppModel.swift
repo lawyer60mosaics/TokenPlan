@@ -295,30 +295,34 @@ final class AppModel: ObservableObject {
             },
             updatedAt: Date()
         )
-        let primary = snapshot.profiles.first(where: { $0.enabled })
+        let primary = snapshot.featuredProfile
+        let usage = primary?.usage ?? .waiting
+        let metricTitle: String
+        if let balance = usage.balances.first {
+            metricTitle = "\(balance.currency) 可用余额"
+        } else {
+            metricTitle = usage.tiers.first?.title ?? "套餐状态"
+        }
+        let secondary: String
+        if let balance = usage.balances.first {
+            secondary = "赠送 \(balance.grantedBalance) · 充值 \(balance.toppedUpBalance)"
+        } else if usage.tiers.count > 1 {
+            secondary = "\(usage.tiers[1].title) \(usage.tiers[1].percentageText)"
+        } else if let reset = usage.tiers.first?.resetText {
+            secondary = reset
+        } else {
+            secondary = usage.plan ?? usage.headline
+        }
         return TokenPlanActivityAttributes.ContentState(
             enabledCount: snapshot.enabledCount,
             totalCount: snapshot.totalCount,
             primaryName: primary?.name ?? "尚无启用套餐",
-            primaryDetail: usageSummary(primary?.usage),
+            primaryMetricTitle: metricTitle,
+            primaryDetail: usage.headline,
+            secondaryDetail: secondary,
+            primaryProgress: (usage.primaryTier?.clampedUtilization ?? 0) / 100,
             updatedAt: snapshot.updatedAt
         )
-    }
-
-    private func usageSummary(_ usage: PlanUsage?) -> String {
-        guard let usage else { return "等待刷新" }
-        if let balance = usage.balances.first {
-            return "\(balance.currency) \(balance.totalBalance)"
-        }
-        if let tier = usage.tiers.first {
-            return "\(tier.title) \(Int(tier.utilization.rounded()))%"
-        }
-        switch usage.status {
-        case .loading: return "刷新中"
-        case .failed: return "刷新失败"
-        case .paused: return "已暂停"
-        default: return "等待刷新"
-        }
     }
 
     private func updateLiveActivities(with snapshot: TokenPlanWidgetSnapshot) {
