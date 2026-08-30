@@ -5,6 +5,7 @@ import { newProfile, providers } from '../src/providers.js';
 
 let profiles = providers.map(p => ({ ...newProfile(p.id), id: p.id, api_key: 'fictional-api', access_key: 'fictional-ak', secret_key: 'fictional-sk', organization_id: 'fictional-org', project_id: 'fictional-project', base_url: 'https://api.zenmux.com/usage' }));
 let startup = false;
+let syncState = null;
 // URL-only fixture scenarios; never bundled with the application.
 const balanceScenario = new URLSearchParams(location.search).get('balance');
 let balanceQueries = 0;
@@ -14,6 +15,11 @@ mockIPC((command, args) => {
   if (command === 'save_profiles') { profiles = structuredClone(args.profiles); return; }
   if (command === 'get_autostart') return startup;
   if (command === 'set_autostart') { startup = args.enabled; return; }
+  if (command === 'get_sync_state') return syncState;
+  if (command === 'configure_sync') { syncState = { enabled: true, username: args.username, revision: 1 }; return syncState; }
+  if (command === 'disable_sync') { syncState = null; return; }
+  if (command === 'push_sync') return syncState || { enabled: true, username: 'fixture', revision: 1 };
+  if (command === 'pull_sync') return { profiles: structuredClone(profiles), state: syncState || { enabled: true, username: 'fixture', revision: 1 } };
   if (command === 'query_profile') {
     if (args.profile.provider === 'deepseek') {
       balanceQueries++;

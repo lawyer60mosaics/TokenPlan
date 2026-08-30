@@ -31,7 +31,11 @@ const copy = {
     hint: '每 60 秒自动查询所有启用的配置。', dragFailed: '窗口拖动失败：',
     totalBalance: '总余额', grantedBalance: '赠送余额', toppedUpBalance: '充值余额', balanceAccount: '账户余额',
     available: '● 余额可用', insufficient: '● 余额不足，暂不可调用 API',
-    deepseekHint: '仅支持 DeepSeek 官方 API Key；查询账户余额，不是套餐进度。通过火山等平台调用 DeepSeek，请使用对应平台的查询配置。' },
+    deepseekHint: '仅支持 DeepSeek 官方 API Key；查询账户余额，不是套餐进度。通过火山等平台调用 DeepSeek，请使用对应平台的查询配置。',
+    dashboard: '套餐总览', monitoring: '正在监控', healthy: '正常', alerts: '异常', lastRefresh: '最近刷新',
+    myPlans: '我的套餐', plansUnit: '个', refreshAll: '全部刷新', used: '已使用', editPlan: '编辑套餐',
+    viewConfig: '查看配置', notUpdated: '尚未获取数据', staleData: '本次刷新失败，正在显示上次数据',
+    addFirst: '添加第一个 AI 套餐', normal: '正常', abnormal: '异常', pending: '待刷新', appSubtitle: 'AI 套餐用量仪表盘' },
   en: { five_hour: '5h session', weekly_limit: 'Last 7 days', monthly: 'Last month', waiting: 'Waiting',
     needsConfig: 'Configure this plan in Settings', loading: 'Refreshing…', success: '● Query successful', failed: 'Query failed (click for details)',
     paused: 'Plan paused', noProfiles: 'No plans configured', settings: '[Settings]', refresh: '[Refresh]', exit: '[Exit]',
@@ -53,23 +57,17 @@ const copy = {
     hint: 'Every enabled profile refreshes automatically every 60 seconds.', dragFailed: 'Window drag failed: ',
     totalBalance: 'Total balance', grantedBalance: 'Granted balance', toppedUpBalance: 'Topped-up balance', balanceAccount: 'Account balance',
     available: '● Balance available', insufficient: '● Insufficient balance for API calls',
-    deepseekHint: 'Requires an official DeepSeek API key. Queries account balance, not plan usage. For DeepSeek via another platform, use that platform’s profile.' },
+    deepseekHint: 'Requires an official DeepSeek API key. Queries account balance, not plan usage. For DeepSeek via another platform, use that platform’s profile.',
+    dashboard: 'Plan overview', monitoring: 'being monitored', healthy: 'Healthy', alerts: 'Alerts', lastRefresh: 'Last refresh',
+    myPlans: 'My plans', plansUnit: 'plans', refreshAll: 'Refresh all', used: 'used', editPlan: 'Edit plan',
+    viewConfig: 'View settings', notUpdated: 'No usage fetched yet', staleData: 'Refresh failed; showing previous data',
+    addFirst: 'Add your first AI plan', normal: 'Healthy', abnormal: 'Alert', pending: 'Pending', appSubtitle: 'AI plan usage dashboard' },
 };
 const tr = key => copy[lang.value][key] || key;
 const profiles = ref([]);
 const selected = ref(localStorage.getItem('token-plan-selected') || '');
 const records = ref({});
-const current = computed(() => profiles.value.find(p => p.id === selected.value));
-const currentState = computed(() => records.value[selected.value] || { status: 'waiting', tiers: [], balances: [], queriedAt: null });
-const hasData = computed(() => !!(currentState.value.tiers.length || currentState.value.balances?.length));
-const statusText = computed(() => {
-  if (!current.value) return tr('noProfiles');
-  const state = currentState.value;
-  if (state.issue) return tr(state.issue);
-  if (state.status === 'success' && state.kind === 'balance') return tr(state.isAvailable ? 'available' : 'insufficient');
-  return tr(state.status);
-});
-const showSettings = ref(false), showError = ref(false), dragError = ref(''), loadError = ref('');
+const showSettings = ref(false), dragError = ref(''), loadError = ref('');
 const showNotices = ref(false), noticesButton = ref(null), noticesScroll = ref(null), noticesBack = ref(null);
 const drafts = ref([]), draftId = ref(''), saveError = ref(''), saving = ref(false), confirmDelete = ref('');
 const autostart = ref(false);
@@ -77,6 +75,10 @@ const syncState = ref(null), syncUsername = ref(''), syncPassword = ref('');
 const syncMessage = ref(''), syncing = ref(false);
 const draft = computed(() => drafts.value.find(p => p.id === draftId.value));
 const draftMeta = computed(() => providerInfo(draft.value?.provider));
+const enabledCount = computed(() => profiles.value.filter(profile => profile.enabled).length);
+const healthyCount = computed(() => profiles.value.filter(profile => profile.enabled && records.value[profile.id]?.status === 'success').length);
+const warningCount = computed(() => profiles.value.filter(profile => profile.enabled && records.value[profile.id]?.status === 'failed').length);
+const latestQuery = computed(() => Math.max(0, ...Object.values(records.value).map(record => Number(record.queriedAt) || 0)) || null);
 let timer, unlisten;
 let disposed = false;
 const tracker = createUsageTracker(
@@ -91,25 +93,40 @@ function toggleLanguage() {
   localStorage.setItem('token-plan-language', lang.value);
   document.documentElement.lang = lang.value === 'zh' ? 'zh-CN' : 'en';
 }
-function selectProfile(event) {
-  if (event.target.value === '__add__') { event.target.value = selected.value; settings(true); return; }
-  selected.value = event.target.value;
-  rememberSelection();
-  showError.value = false;
-  refresh();
-}
-function refresh() { if (current.value) return tracker.refresh(current.value); }
 function refreshAll() { return Promise.all(profiles.value.map(p => tracker.refresh(p))); }
+function stateFor(profile) { return records.value[profile.id] || { status: profile.enabled ? 'waiting' : 'paused', tiers: [], balances: [], queriedAt: null }; }
+function hasUsage(state) { return !!(state.tiers?.length || state.balances?.length); }
+function providerLabel(profile) {
+  const info = providerInfo(profile.provider);
+  return lang.value === 'zh' ? (info?.zh || profile.provider) : (info?.name || profile.provider);
+}
+function providerMark(profile) {
+  return ({ volcengine: 'V', kimi: 'K', zhipu: 'GLM', zhipu_team: 'GLM', minimax: 'M', zenmux: 'Z', opencode_go: '</>', deepseek: 'D' })[profile.provider] || 'TP';
+}
+function statusLabel(profile, state) {
+  if (!profile.enabled || state.status === 'paused') return tr('paused');
+  if (state.status === 'success') return tr('normal');
+  if (state.status === 'failed') return tr('abnormal');
+  if (state.status === 'loading') return tr('loading');
+  if (state.status === 'needsConfig') return tr('needsConfig');
+  return tr('pending');
+}
+function statusTone(profile, state) {
+  if (!profile.enabled || state.status === 'paused') return 'paused';
+  if (state.status === 'success') return 'success';
+  if (state.status === 'failed' || state.status === 'needsConfig') return 'failed';
+  if (state.status === 'loading') return 'loading';
+  return 'waiting';
+}
+function metricTone(fill) { return fill >= 90 ? 'danger' : fill >= 70 ? 'warning' : 'accent'; }
+function editProfile(profile) {
+  selected.value = profile.id;
+  rememberSelection();
+  settings();
+}
+function refreshProfile(profile) { return tracker.refresh(profile); }
 async function closeApp() {
   try { await invoke('exit_app'); } catch (error) { dragError.value = String(error); }
-}
-function formatTime(value) {
-  if (!value) return '—';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return String(value);
-  // Stable compact local time fits in the 340px widget in either language.
-  const pad = n => String(n).padStart(2, '0');
-  return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate()) + ' ' + pad(date.getHours()) + ':' + pad(date.getMinutes()) + ':' + pad(date.getSeconds());
 }
 function money(value) { return typeof value === 'number' && Number.isFinite(value) ? '$' + value.toFixed(2) : '—'; }
 
@@ -124,6 +141,17 @@ function settings(add = false) {
   showSettings.value = true;
   invoke('get_autostart').then(value => { autostart.value = value; }).catch(error => { saveError.value = String(error); });
   loadSyncState();
+}
+function formatCompactTime(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return new Intl.DateTimeFormat(lang.value === 'zh' ? 'zh-CN' : 'en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(date);
+}
+function formatClock(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '—' : new Intl.DateTimeFormat(lang.value === 'zh' ? 'zh-CN' : 'en-US', { hour: '2-digit', minute: '2-digit' }).format(date);
 }
 async function loadSyncState() {
   try {
@@ -273,43 +301,93 @@ onUnmounted(() => { disposed = true; clearInterval(timer); unlisten?.(); });
 </script>
 
 <template>
-  <section class="card" @mousedown.left="beginDrag">
-    <header>
-      <select :value="selected" @change="selectProfile" :aria-label="tr('config')" :disabled="!!loadError">
-        <option v-if="!profiles.length" value="">{{ tr('noProfiles') }}</option>
-        <option v-for="profile in profiles" :key="profile.id" :value="profile.id">{{ profile.enabled ? '' : 'Ⅱ ' }}{{ profile.name }}</option>
-        <option value="__add__">{{ tr('add') }}</option>
-      </select>
-      <span class="header-actions"><button class="language" @click="toggleLanguage" aria-label="中文 / English">{{ lang === 'zh' ? 'EN' : '中' }}</button><button @click="settings()" :disabled="!!loadError">{{ tr('settings') }}</button></span>
-    </header>
-    <div class="rows">
-      <template v-if="currentState.kind === 'balance'">
-        <section v-for="balance in currentState.balances" :key="balance.currency" class="balance-group" :aria-label="balance.currency + ' ' + tr('balanceAccount')">
-          <div class="balance-heading">{{ tr('balanceAccount') }} · {{ balance.currency }}</div>
-          <article v-for="field in ['totalBalance', 'grantedBalance', 'toppedUpBalance']" :key="field" class="balance-row">
-            <div>{{ tr(field) }}</div>
-            <div class="balance-value">{{ balance.currency }} {{ balance[field] }}</div>
-          </article>
-        </section>
-      </template>
-      <template v-else>
-      <article v-for="(tier, index) in currentState.tiers" :key="tier.name + index" class="quota">
-        <div class="quota-head"><span>{{ tr(tier.name) }}</span><time :title="tier.resetsAt ? formatTime(tier.resetsAt) : tr('noReset')">{{ tier.resetsAt ? formatTime(tier.resetsAt) : tr('noReset') }}</time></div>
-        <div class="percent">{{ tier.utilization.toFixed(2) }}%<small v-if="tier.usedValueUsd != null || tier.maxValueUsd != null" :title="tr('amount')">{{ money(tier.usedValueUsd) }} / {{ money(tier.maxValueUsd) }}</small></div>
-        <div class="track" role="progressbar" :aria-label="tr(tier.name)" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="tier.fill"><i :style="{ width: tier.fill + '%' }"></i></div>
-      </article>
-      </template>
-      <div v-if="!hasData" class="empty-state">
-        <p>{{ currentState.status === 'loading' ? tr('loading') : tr('noData') }}</p>
-        <button v-if="!current || currentState.status === 'needsConfig'" @click="settings()" :disabled="!!loadError">{{ current ? tr('settings') : tr('add') }}</button>
+  <section class="app-window" @mousedown.left="beginDrag">
+    <header class="titlebar">
+      <div class="brand-block">
+        <span class="brand-icon" aria-hidden="true">TP</span>
+        <span><strong>TokenPlan</strong><small>{{ tr('appSubtitle') }}</small></span>
       </div>
-    </div>
-    <footer>
-      <button v-if="currentState.error" class="status error-status" :title="currentState.error" @click="showError = !showError">{{ tr('failed') }}{{ hasData ? ' · ' + tr('stale') : '' }}</button>
-      <span v-else class="status" :title="currentState.plan || statusText">{{ statusText }}</span>
-      <div class="footer-line"><time :title="tr('updated')">{{ formatTime(currentState.queriedAt) }}</time><span class="actions"><button @click="refresh" :disabled="!current || !current.enabled || currentState.status === 'loading'">{{ tr('refresh') }}</button><button @click="closeApp">{{ tr('exit') }}</button></span></div>
-    </footer>
-    <p v-if="showError && currentState.error || dragError || loadError" class="error-popover" role="alert" data-no-drag>{{ loadError || dragError || currentState.error }}<button v-if="!loadError" @click="showError = false; dragError = ''">{{ tr('close') }}</button></p>
+      <nav class="window-actions" data-no-drag>
+        <button class="icon-button language" @click="toggleLanguage" aria-label="中文 / English">{{ lang === 'zh' ? 'EN' : '中' }}</button>
+        <button class="icon-button" @click="settings()" :disabled="!!loadError" :aria-label="tr('settings')" title="Settings">⚙</button>
+        <button class="icon-button close-button" @click="closeApp" :aria-label="tr('exit')" title="Close">×</button>
+      </nav>
+    </header>
+
+    <main class="dashboard-scroll">
+      <section class="overview-card" :aria-label="tr('dashboard')">
+        <div class="overview-top">
+          <div><span class="eyebrow">{{ tr('dashboard') }}</span><h1>{{ enabledCount }} {{ tr('plansUnit') }}{{ lang === 'zh' ? tr('monitoring') : ' ' + tr('monitoring') }}</h1></div>
+          <span class="pulse-icon" :class="{ spinning: profiles.some(profile => stateFor(profile).status === 'loading') }" aria-hidden="true">∿</span>
+        </div>
+        <div class="overview-metrics">
+          <div><strong>{{ healthyCount }}</strong><span><i class="dot success"></i>{{ tr('healthy') }}</span></div>
+          <div><strong>{{ warningCount }}</strong><span><i class="dot failed"></i>{{ tr('alerts') }}</span></div>
+          <div><strong>{{ formatClock(latestQuery) }}</strong><span><i class="clock-mark"></i>{{ tr('lastRefresh') }}</span></div>
+        </div>
+      </section>
+
+      <section class="plans-section">
+        <div class="section-heading">
+          <div><h2>{{ tr('myPlans') }}</h2><span>{{ profiles.length }} {{ tr('plansUnit') }}</span></div>
+          <button class="secondary-button" @click="refreshAll" :disabled="!profiles.length">↻ {{ tr('refreshAll') }}</button>
+        </div>
+
+        <div v-if="profiles.length" class="plan-list">
+          <article v-for="profile in profiles" :key="profile.id" class="plan-card" :class="'provider-' + profile.provider" data-no-drag @click="editProfile(profile)">
+            <div class="plan-header">
+              <span class="provider-mark" aria-hidden="true">{{ providerMark(profile) }}</span>
+              <div class="plan-identity">
+                <h3>{{ profile.name }}</h3>
+                <p>{{ providerLabel(profile) }}<template v-if="stateFor(profile).plan"> · {{ stateFor(profile).plan }}</template></p>
+              </div>
+              <span class="status-chip" :class="statusTone(profile, stateFor(profile))"><i></i>{{ statusLabel(profile, stateFor(profile)) }}</span>
+            </div>
+
+            <div v-if="stateFor(profile).kind === 'balance' && stateFor(profile).balances?.length" class="balance-metrics">
+              <div v-for="balance in stateFor(profile).balances" :key="balance.currency" class="balance-card">
+                <div><span>{{ balance.currency }} {{ tr('totalBalance') }}</span><strong>{{ balance.totalBalance }}</strong></div>
+                <dl><div><dt>{{ tr('grantedBalance') }}</dt><dd>{{ balance.grantedBalance }}</dd></div><div><dt>{{ tr('toppedUpBalance') }}</dt><dd>{{ balance.toppedUpBalance }}</dd></div></dl>
+              </div>
+            </div>
+
+            <div v-else-if="stateFor(profile).tiers?.length" class="tier-list">
+              <div v-for="(tier, index) in stateFor(profile).tiers" :key="tier.name + index" class="tier-row">
+                <div class="tier-heading">
+                  <div><strong>{{ tr(tier.name) }}</strong><span v-if="tier.resetsAt">↺ {{ formatCompactTime(tier.resetsAt) }}</span></div>
+                  <div class="tier-value"><small v-if="tier.usedValueUsd != null || tier.maxValueUsd != null">{{ money(tier.usedValueUsd) }} / {{ money(tier.maxValueUsd) }}</small><strong>{{ tier.utilization.toFixed(1) }}%</strong></div>
+                </div>
+                <div class="progress-track" role="progressbar" :aria-label="tr(tier.name)" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="tier.fill"><i :class="metricTone(tier.fill)" :style="{ width: tier.fill + '%' }"></i></div>
+              </div>
+            </div>
+
+            <div v-else class="plan-empty">
+              <span>{{ stateFor(profile).status === 'loading' ? tr('loading') : stateFor(profile).issue ? tr(stateFor(profile).issue) : tr('notUpdated') }}</span>
+            </div>
+
+            <p v-if="stateFor(profile).status === 'failed' && hasUsage(stateFor(profile))" class="stale-warning">⚠ {{ tr('staleData') }}</p>
+            <p v-else-if="stateFor(profile).error" class="stale-warning" :title="stateFor(profile).error">⚠ {{ stateFor(profile).error }}</p>
+
+            <footer class="plan-footer">
+              <span>{{ stateFor(profile).queriedAt ? formatCompactTime(stateFor(profile).queriedAt) : tr('notUpdated') }}</span>
+              <span class="card-actions" data-no-drag>
+                <button class="card-refresh" @click.stop="refreshProfile(profile)" :disabled="!profile.enabled || stateFor(profile).status === 'loading'" :aria-label="tr('refresh')">↻</button>
+                <span>{{ tr('viewConfig') }} ›</span>
+              </span>
+            </footer>
+          </article>
+        </div>
+
+        <div v-else class="empty-dashboard">
+          <span class="empty-icon" aria-hidden="true">+</span>
+          <h2>{{ tr('noProfiles') }}</h2>
+          <p>{{ tr('addFirst') }}</p>
+          <button class="primary-button" @click="settings(true)" :disabled="!!loadError">{{ tr('add') }}</button>
+        </div>
+      </section>
+    </main>
+
+    <p v-if="dragError || loadError" class="error-popover" role="alert" data-no-drag>{{ loadError || dragError }}<button v-if="!loadError" @click="dragError = ''">{{ tr('close') }}</button></p>
 
     <section v-if="showSettings" class="settings-panel" role="dialog" aria-modal="true" :aria-label="tr(showNotices ? 'notices' : 'title')" @keydown.esc.stop.prevent="settingsEscape">
       <div class="settings-title">{{ tr(showNotices ? 'notices' : 'title') }}</div>

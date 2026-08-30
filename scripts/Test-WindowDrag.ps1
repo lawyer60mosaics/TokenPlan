@@ -37,8 +37,8 @@ $cursor = New-Object DragProbe+Point
 [void][DragProbe]::GetWindowRect($handle, [ref]$before)
 [void][DragProbe]::GetCursorPos([ref]$cursor)
 [void][DragProbe]::SetForegroundWindow($handle)
-$scale = ($before.Right - $before.Left) / 340.0
-$offset = switch ($Region) { 'text' { @(44, 99) }; 'progress' { @(65, 118) }; 'blank' { @(10, 310) }; 'settings' { @(280, 30) } }
+$scale = ($before.Right - $before.Left) / 480.0
+$offset = switch ($Region) { 'text' { @(68, 112) }; 'progress' { @(90, 385) }; 'blank' { @(10, 535) }; 'settings' { @(290, 105) } }
 $x = $before.Left + [int]($offset[0] * $scale)
 $y = $before.Top + [int]($offset[1] * $scale)
 $hitPoint = New-Object DragProbe+Point
