@@ -73,6 +73,33 @@ struct ContentView: View {
             .listRowSeparator(.hidden)
             .listRowBackground(Color.clear)
 
+            if !model.isWidgetSharingAvailable {
+                Button { showingSync = true } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "exclamationmark.shield.fill")
+                            .font(.title3)
+                            .foregroundStyle(.orange)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("小组件无法读取套餐")
+                                .font(.subheadline.weight(.semibold))
+                            Text("点击查看 App Group 签名诊断")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption.bold())
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(14)
+                    .background(Color.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 10, trailing: 16))
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+            }
+
             Section {
                 ForEach(model.profiles) { profile in
                     Button { editingProfile = profile } label: {

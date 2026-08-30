@@ -272,11 +272,14 @@ private struct WidgetStatusView: View {
 private struct WidgetEmptyView: View {
     var body: some View {
         VStack(spacing: 8) {
-            Image(systemName: "chart.bar.xaxis")
+            Image(systemName: WidgetSnapshotStore.isAppGroupAvailable ? "chart.bar.xaxis" : "exclamationmark.shield.fill")
                 .font(.title)
-                .foregroundStyle(.indigo)
-            Text("尚无套餐").font(.headline)
-            Text("打开 TokenPlan 添加或同步套餐")
+                .foregroundStyle(WidgetSnapshotStore.isAppGroupAvailable ? .indigo : .orange)
+            Text(WidgetSnapshotStore.isAppGroupAvailable ? "尚未共享套餐" : "签名权限缺失")
+                .font(.headline)
+            Text(WidgetSnapshotStore.isAppGroupAvailable
+                 ? "打开 TokenPlan 后刷新套餐"
+                 : "重签名时需保留 App Group")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -349,7 +352,9 @@ private struct TokenPlanLockScreenView: View {
                     Text("\(balance.currency) 余额  \(balance.totalBalance)")
                         .font(.subheadline.bold()).monospacedDigit()
                 } else {
-                    Text(primary?.usage.headline ?? "打开 App 添加套餐")
+                    Text(primary?.usage.headline ?? (WidgetSnapshotStore.isAppGroupAvailable
+                         ? "打开 App 刷新套餐"
+                         : "签名缺少 App Group"))
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
@@ -361,13 +366,17 @@ private struct TokenPlanLockScreenView: View {
     }
 
     private var inlineSummary: String {
-        guard let primary else { return "TokenPlan 尚无套餐" }
+        guard let primary else {
+            return WidgetSnapshotStore.isAppGroupAvailable ? "TokenPlan 尚未共享套餐" : "TokenPlan 签名缺少 App Group"
+        }
         let detail = primary.usage.compactDetail.isEmpty ? primary.usage.headline : primary.usage.compactDetail
         return "\(primary.name) · \(detail)"
     }
 
     private var circularAccessibilityLabel: String {
-        guard let primary, let tier else { return "TokenPlan 尚无套餐用量" }
+        guard let primary, let tier else {
+            return WidgetSnapshotStore.isAppGroupAvailable ? "TokenPlan 尚无套餐用量" : "TokenPlan 签名缺少 App Group"
+        }
         return "\(primary.name)，\(tier.title)，已使用 \(tier.percentageText)"
     }
 }

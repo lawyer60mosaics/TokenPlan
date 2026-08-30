@@ -14,6 +14,8 @@ final class AppModel: ObservableObject {
     @Published var isBusy = false
     @Published var isRefreshing = false
     @Published var isLiveActivityActive = false
+    @Published var isWidgetSharingAvailable = false
+    @Published var widgetSharingStatus = "检测中"
     @Published var message = ""
     @Published var errorMessage = ""
 
@@ -207,6 +209,16 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func repairWidgetSharing() {
+        clearStatus()
+        publishWidgetSnapshot()
+        if isWidgetSharingAvailable {
+            message = "已重新写入小组件套餐数据"
+        } else {
+            errorMessage = "当前 IPA 签名缺少 App Group \(WidgetSnapshotStore.appGroup)，请使用包含该权限的证书同时重签主程序和小组件扩展"
+        }
+    }
+
     func startLiveActivity() async {
         clearStatus()
         guard #available(iOS 16.1, *) else {
@@ -279,7 +291,14 @@ final class AppModel: ObservableObject {
             },
             updatedAt: Date()
         )
-        try? WidgetSnapshotStore.save(snapshot)
+        do {
+            try WidgetSnapshotStore.save(snapshot)
+            isWidgetSharingAvailable = true
+            widgetSharingStatus = WidgetSnapshotStore.diagnosticText
+        } catch {
+            isWidgetSharingAvailable = false
+            widgetSharingStatus = error.localizedDescription
+        }
         WidgetCenter.shared.reloadAllTimelines()
         updateLiveActivities(with: snapshot)
     }

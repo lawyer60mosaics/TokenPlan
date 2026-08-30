@@ -48,6 +48,25 @@ struct SyncSettingsView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
+                Section("小组件数据共享") {
+                    LabeledContent("状态") {
+                        Label(
+                            model.isWidgetSharingAvailable ? "正常" : "不可用",
+                            systemImage: model.isWidgetSharingAvailable ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"
+                        )
+                        .foregroundStyle(model.isWidgetSharingAvailable ? Color.green : Color.red)
+                    }
+                    Text(model.widgetSharingStatus)
+                        .font(.footnote)
+                        .foregroundStyle(model.isWidgetSharingAvailable ? Color.secondary : Color.red)
+                        .textSelection(.enabled)
+                    Button("重新写入小组件数据") {
+                        model.repairWidgetSharing()
+                    }
+                    Text("未签名 IPA 重签时，主程序和 TokenPlanWidgets.appex 必须使用同一开发团队，并同时包含 group.com.xuwenxu.tokenplan。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 if model.isBusy {
                     Section { ProgressView("同步中…") }
                 }

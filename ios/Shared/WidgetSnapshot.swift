@@ -41,6 +41,7 @@ struct TokenPlanWidgetSnapshot: Codable, Hashable, Sendable {
 
 enum WidgetSnapshotStore {
     static let appGroup = "group.com.xuwenxu.tokenplan"
+    private static let snapshotFileName = "widget-snapshot-v3.json"
     private static let snapshotKey = "widget.snapshot.v2"
     private static let legacySnapshotKey = "widget.snapshot.v1"
 
@@ -57,13 +58,22 @@ enum WidgetSnapshotStore {
     }
 
     static func save(_ snapshot: TokenPlanWidgetSnapshot) throws {
-        guard let defaults = UserDefaults(suiteName: appGroup) else {
-            throw CocoaError(.fileWriteUnknown)
+        guard let container = sharedContainerURL else { throw WidgetSnapshotError.missingAppGroup }
+        let data = try JSONEncoder().encode(snapshot)
+        let fileURL = container.appendingPathComponent(snapshotFileName, isDirectory: false)
+        try data.write(to: fileURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        guard let verified = try? Data(contentsOf: fileURL), decode(verified) == snapshot else {
+            throw WidgetSnapshotError.verificationFailed
         }
-        defaults.set(try JSONEncoder().encode(snapshot), forKey: snapshotKey)
+        UserDefaults(suiteName: appGroup)?.set(data, forKey: snapshotKey)
     }
 
     static func load() -> TokenPlanWidgetSnapshot {
+        guard let container = sharedContainerURL else { return .empty }
+        let fileURL = container.appendingPathComponent(snapshotFileName, isDirectory: false)
+        if let data = try? Data(contentsOf: fileURL), let snapshot = decode(data) {
+            return snapshot
+        }
         guard let defaults = UserDefaults(suiteName: appGroup) else { return .empty }
         if let data = defaults.data(forKey: snapshotKey), let snapshot = decode(data) {
             return snapshot
@@ -72,6 +82,18 @@ enum WidgetSnapshotStore {
             return snapshot
         }
         return .empty
+    }
+
+    static var isAppGroupAvailable: Bool { sharedContainerURL != nil }
+
+    static var diagnosticText: String {
+        guard isAppGroupAvailable else { return "签名缺少 App Group 权限" }
+        let count = load().profiles.count
+        return count > 0 ? "已共享 \(count) 个套餐" : "App Group 可用，尚未写入套餐"
+    }
+
+    private static var sharedContainerURL: URL? {
+        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup)
     }
 
     static func decode(_ data: Data) -> TokenPlanWidgetSnapshot? {
@@ -93,5 +115,19 @@ enum WidgetSnapshotStore {
             },
             updatedAt: legacy.updatedAt
         )
+    }
+}
+
+enum WidgetSnapshotError: LocalizedError {
+    case missingAppGroup
+    case verificationFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .missingAppGroup:
+            "小组件无法共享数据：当前签名未包含 App Group \(WidgetSnapshotStore.appGroup)"
+        case .verificationFailed:
+            "小组件共享数据写入后校验失败"
+        }
     }
 }

@@ -1,5 +1,7 @@
 # TokenPlan iOS
 
+> 重签名时必须为主程序和小组件扩展保留同一 App Group。详见 [SIGNING.md](SIGNING.md)。
+
 原生 SwiftUI 客户端，兼容 Windows TokenPlan 当前的云端密文格式。
 
 ## 当前功能
