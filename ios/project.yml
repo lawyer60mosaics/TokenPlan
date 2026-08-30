@@ -23,6 +23,8 @@ targets:
       path: TokenPlan/Info.plist
       properties:
         CFBundleDisplayName: TokenPlan
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         LSApplicationCategoryType: public.app-category.utilities
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
@@ -59,6 +61,8 @@ targets:
       path: TokenPlanWidgets/Info.plist
       properties:
         CFBundleDisplayName: TokenPlan 小组件
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     settings:
