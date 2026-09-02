@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{fs, path::PathBuf, time::Duration};
 
-const ENDPOINT: &str = "https://47.102.119.11";
+const ENDPOINT: &str = "https://tokenplan.xuwenxu.com";
 const SCHEMA_VERSION: u32 = 2;
 const AAD: &[u8] = b"tokenplan-vault-v2";
 
@@ -351,7 +351,7 @@ mod tests {
     fn built_in_endpoint_and_credentials_are_validated() {
         assert_eq!(
             vault_url().unwrap().as_str(),
-            "https://47.102.119.11/api/v1/vault"
+            "https://tokenplan.xuwenxu.com/api/v1/vault"
         );
         assert!(validate_credentials("tokenplan", "1234567890abcdef").is_ok());
         assert!(validate_credentials("bad account", "1234567890abcdef").is_err());

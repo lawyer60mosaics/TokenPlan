@@ -2,7 +2,7 @@ import CryptoKit
 import Foundation
 
 enum SyncCredentials {
-    static let endpoint = URL(string: "https://47.102.119.11")!
+    static let endpoint = URL(string: "https://tokenplan.xuwenxu.com")!
 
     static func validate(username: String, password: String) throws {
         let account = username.trimmingCharacters(in: .whitespacesAndNewlines)

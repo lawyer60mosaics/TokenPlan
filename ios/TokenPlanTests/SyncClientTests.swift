@@ -39,7 +39,7 @@ final class SyncClientTests: XCTestCase {
         let token = "oNgFfFG1T4-ATA1kPkTCHqMSqXyDfZraNWRv4l0vNBY"
         let envelope = VaultEnvelope(schemaVersion: 2, nonce: "nonce", ciphertext: "ciphertext")
         MockURLProtocol.handler = { request in
-            XCTAssertEqual(request.url?.absoluteString, "https://47.102.119.11/api/v1/vault")
+            XCTAssertEqual(request.url?.absoluteString, "https://tokenplan.xuwenxu.com/api/v1/vault")
             XCTAssertEqual(request.httpMethod, "PUT")
             XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer \(token)")
             XCTAssertEqual(request.value(forHTTPHeaderField: "If-Match"), "\"4\"")
