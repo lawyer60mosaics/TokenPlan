@@ -32,6 +32,22 @@ final class SyncClientTests: XCTestCase {
         XCTAssertThrowsError(try SyncClient(username: "tokenplan", password: "short"))
     }
 
+    private func bodyData(from request: URLRequest) throws -> Data {
+        if let body = request.httpBody { return body }
+        let stream = try XCTUnwrap(request.httpBodyStream)
+        stream.open()
+        defer { stream.close() }
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 1_024)
+        while true {
+            let count = stream.read(&buffer, maxLength: buffer.count)
+            if count < 0 { throw try XCTUnwrap(stream.streamError) }
+            if count == 0 { break }
+            data.append(buffer, count: count)
+        }
+        return data
+    }
+
     func testPushUsesBearerAndRevisionWithoutPlaintext() async throws {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [MockURLProtocol.self]
@@ -94,7 +110,7 @@ final class SyncClientTests: XCTestCase {
             XCTAssertEqual(request.httpMethod, "PUT")
             XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer \(oldToken)")
             XCTAssertEqual(request.value(forHTTPHeaderField: "If-Match"), "\"7\"")
-            let body = try XCTUnwrap(request.httpBody)
+            let body = try self.bodyData(from: request)
             let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
             XCTAssertEqual(json["new_token"] as? String, newToken)
             XCTAssertFalse(String(decoding: body, as: UTF8.self).contains("new-password"))
