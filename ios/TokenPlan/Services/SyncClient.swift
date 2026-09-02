@@ -27,6 +27,16 @@ struct UpdateResponse: Codable {
     let revision: UInt64
 }
 
+private struct RotateCredentialsRequest: Codable {
+    let newToken: String
+    let envelope: VaultEnvelope
+
+    enum CodingKeys: String, CodingKey {
+        case envelope
+        case newToken = "new_token"
+    }
+}
+
 struct SyncClient {
     let token: String
     var session: URLSession = .shared
@@ -71,8 +81,27 @@ struct SyncClient {
         return try JSONDecoder().decode(UpdateResponse.self, from: data).revision
     }
 
+    func rotateCredentials(newToken: String, envelope: VaultEnvelope, revision: UInt64) async throws -> UInt64 {
+        var request = URLRequest(url: credentialsURL)
+        request.httpMethod = "PUT"
+        request.timeoutInterval = 15
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("\"\(revision)\"", forHTTPHeaderField: "If-Match")
+        request.httpBody = try JSONEncoder().encode(
+            RotateCredentialsRequest(newToken: newToken, envelope: envelope)
+        )
+        let (data, response) = try await session.data(for: request)
+        try validate(response, allowing: [200])
+        return try JSONDecoder().decode(UpdateResponse.self, from: data).revision
+    }
+
     private var vaultURL: URL {
         SyncCredentials.endpoint.appendingPathComponent("api/v1/vault")
+    }
+
+    private var credentialsURL: URL {
+        SyncCredentials.endpoint.appendingPathComponent("api/v1/vault/credentials")
     }
 
     private func validate(_ response: URLResponse, allowing statuses: Set<Int>) throws {

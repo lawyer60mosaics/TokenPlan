@@ -61,6 +61,12 @@ struct UpdateResponse {
     revision: u64,
 }
 
+#[derive(Serialize)]
+struct RotateCredentialsRequest {
+    new_token: String,
+    envelope: VaultEnvelope,
+}
+
 impl From<&SyncConfig> for SyncState {
     fn from(config: &SyncConfig) -> Self {
         Self {
@@ -161,6 +167,12 @@ fn vault_url() -> Result<Url, String> {
         return Err("Built-in sync endpoint is invalid / 内置同步地址无效".into());
     }
     url.set_path("/api/v1/vault");
+    Ok(url)
+}
+
+fn credentials_url() -> Result<Url, String> {
+    let mut url = vault_url()?;
+    url.set_path("/api/v1/vault/credentials");
     Ok(url)
 }
 
@@ -331,6 +343,91 @@ pub async fn pull() -> Result<PullResult, String> {
     })
 }
 
+pub async fn change_password(
+    current_password: String,
+    new_password: String,
+) -> Result<SyncState, String> {
+    let config = load_config()?.ok_or("Cloud sync is not configured / 尚未配置云同步")?;
+    if !config.enabled {
+        return Err("Cloud sync is disabled / 云同步已关闭".into());
+    }
+    validate_credentials(&config.username, &current_password)?;
+    validate_credentials(&config.username, &new_password)?;
+    if current_password == new_password {
+        return Err("New password must be different / 新密码不能与当前密码相同".into());
+    }
+
+    let current = SyncConfig {
+        password: current_password,
+        ..config.clone()
+    };
+    let response = client()?
+        .get(vault_url()?)
+        .bearer_auth(auth_token(&current))
+        .send()
+        .await
+        .map_err(|_| "Cloud sync request failed / 云同步请求失败")?;
+    if response.status() == StatusCode::NOT_FOUND {
+        return Err("Cloud vault is empty / 云端尚无配置".into());
+    }
+    if response.status() == StatusCode::UNAUTHORIZED {
+        return Err("Current password is incorrect / 当前密码错误".into());
+    }
+    if !response.status().is_success() {
+        return Err(format!(
+            "Cloud download failed (HTTP {}) / 云端下载失败",
+            response.status().as_u16()
+        ));
+    }
+    let vault: VaultResponse = response
+        .json()
+        .await
+        .map_err(|_| "Invalid cloud response / 云端响应无效")?;
+    let plaintext = decrypt(&vault_key(&current), &vault.envelope)?;
+    let profiles: Vec<Profile> = serde_json::from_slice(&plaintext)
+        .map_err(|_| "Invalid profiles in cloud vault / 云端套餐配置无效")?;
+    validate_profiles(&profiles)?;
+
+    let mut next = SyncConfig {
+        password: new_password,
+        revision: vault.revision,
+        ..config
+    };
+    let request = RotateCredentialsRequest {
+        new_token: auth_token(&next),
+        envelope: encrypt(&vault_key(&next), &plaintext)?,
+    };
+    let response = client()?
+        .put(credentials_url()?)
+        .bearer_auth(auth_token(&current))
+        .header(header::IF_MATCH, format!("\"{}\"", vault.revision))
+        .json(&request)
+        .send()
+        .await
+        .map_err(|_| "Password change request failed / 修改密码请求失败")?;
+    if response.status() == StatusCode::CONFLICT {
+        return Err(
+            "Cloud version changed; retry password change / 云端版本已变化，请重试修改密码".into(),
+        );
+    }
+    if response.status() == StatusCode::UNAUTHORIZED {
+        return Err("Current password is incorrect / 当前密码错误".into());
+    }
+    if !response.status().is_success() {
+        return Err(format!(
+            "Password change failed (HTTP {}) / 修改密码失败",
+            response.status().as_u16()
+        ));
+    }
+    let update: UpdateResponse = response
+        .json()
+        .await
+        .map_err(|_| "Invalid cloud response / 云端响应无效")?;
+    next.revision = update.revision;
+    save_config(&next)?;
+    Ok(SyncState::from(&next))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -352,6 +449,10 @@ mod tests {
         assert_eq!(
             vault_url().unwrap().as_str(),
             "https://tokenplan.xuwenxu.com/api/v1/vault"
+        );
+        assert_eq!(
+            credentials_url().unwrap().as_str(),
+            "https://tokenplan.xuwenxu.com/api/v1/vault/credentials"
         );
         assert!(validate_credentials("tokenplan", "1234567890abcdef").is_ok());
         assert!(validate_credentials("bad account", "1234567890abcdef").is_err());

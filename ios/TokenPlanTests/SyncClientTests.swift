@@ -81,4 +81,37 @@ final class SyncClientTests: XCTestCase {
             // Expected.
         }
     }
+
+    func testCredentialRotationUsesOldAuthorizationAndEncryptedPayload() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let oldToken = "oNgFfFG1T4-ATA1kPkTCHqMSqXyDfZraNWRv4l0vNBY"
+        let newToken = String(repeating: "z", count: 43)
+        let envelope = VaultEnvelope(schemaVersion: 2, nonce: "new-nonce", ciphertext: "new-ciphertext")
+        MockURLProtocol.handler = { request in
+            XCTAssertEqual(request.url?.absoluteString, "https://tokenplan.xuwenxu.com/api/v1/vault/credentials")
+            XCTAssertEqual(request.httpMethod, "PUT")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer \(oldToken)")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "If-Match"), "\"7\"")
+            let body = try XCTUnwrap(request.httpBody)
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            XCTAssertEqual(json["new_token"] as? String, newToken)
+            XCTAssertFalse(String(decoding: body, as: UTF8.self).contains("new-password"))
+            let response = HTTPURLResponse(
+                url: try XCTUnwrap(request.url),
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, Data(#"{"revision":8}"#.utf8))
+        }
+        let client = try SyncClient(username: "tokenplan", password: "correct-horse-1234", session: session)
+        let revision = try await client.rotateCredentials(
+            newToken: newToken,
+            envelope: envelope,
+            revision: 7
+        )
+        XCTAssertEqual(revision, 8)
+    }
 }

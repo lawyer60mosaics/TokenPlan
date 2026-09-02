@@ -28,6 +28,8 @@ const copy = {
     credentialsHint: '其他设备使用相同账号和密码即可同步。认证与加密密钥由应用自动生成。',
     syncConfigured: '云同步配置成功', uploadSuccess: '已上传加密配置', downloadSuccess: '已下载并替换本地配置',
     localSavedSyncFailed: '本地已保存，云同步失败：', syncFailed: '云同步失败：',
+    changePassword: '修改同步密码', currentPassword: '当前密码', newPassword: '新密码', confirmPassword: '确认新密码',
+    passwordMismatch: '两次输入的新密码不一致', passwordUnchanged: '新密码不能与当前密码相同', passwordChanged: '同步密码修改成功，其他设备需要重新登录',
     hint: '每 60 秒自动查询所有启用的配置。', dragFailed: '窗口拖动失败：',
     totalBalance: '总余额', grantedBalance: '赠送余额', toppedUpBalance: '充值余额', balanceAccount: '账户余额',
     available: '● 余额可用', insufficient: '● 余额不足，暂不可调用 API',
@@ -54,6 +56,8 @@ const copy = {
     credentialsHint: 'Use the same account and password on another device. The app derives separate authentication and encryption keys automatically.',
     syncConfigured: 'Cloud sync configured', uploadSuccess: 'Encrypted profiles uploaded', downloadSuccess: 'Cloud profiles downloaded and applied locally',
     localSavedSyncFailed: 'Saved locally, but cloud sync failed: ', syncFailed: 'Cloud sync failed: ',
+    changePassword: 'Change sync password', currentPassword: 'Current password', newPassword: 'New password', confirmPassword: 'Confirm new password',
+    passwordMismatch: 'The new passwords do not match', passwordUnchanged: 'The new password must differ from the current password', passwordChanged: 'Sync password changed; sign in again on other devices',
     hint: 'Every enabled profile refreshes automatically every 60 seconds.', dragFailed: 'Window drag failed: ',
     totalBalance: 'Total balance', grantedBalance: 'Granted balance', toppedUpBalance: 'Topped-up balance', balanceAccount: 'Account balance',
     available: '● Balance available', insufficient: '● Insufficient balance for API calls',
@@ -72,6 +76,7 @@ const showNotices = ref(false), noticesButton = ref(null), noticesScroll = ref(n
 const drafts = ref([]), draftId = ref(''), saveError = ref(''), saving = ref(false), confirmDelete = ref('');
 const autostart = ref(false);
 const syncState = ref(null), syncUsername = ref(''), syncPassword = ref('');
+const currentSyncPassword = ref(''), newSyncPassword = ref(''), confirmSyncPassword = ref('');
 const syncMessage = ref(''), syncing = ref(false);
 const draft = computed(() => drafts.value.find(p => p.id === draftId.value));
 const draftMeta = computed(() => providerInfo(draft.value?.provider));
@@ -211,6 +216,25 @@ async function disableCloudSync() {
     syncUsername.value = '';
     syncPassword.value = '';
     syncMessage.value = tr('syncOff');
+  } catch (error) { syncMessage.value = tr('syncFailed') + String(error); }
+  finally { syncing.value = false; }
+}
+async function changeCloudPassword() {
+  if (syncing.value) return;
+  if (!currentSyncPassword.value || newSyncPassword.value.length < 16) { syncMessage.value = tr('credentialsRequired'); return; }
+  if (newSyncPassword.value !== confirmSyncPassword.value) { syncMessage.value = tr('passwordMismatch'); return; }
+  if (newSyncPassword.value === currentSyncPassword.value) { syncMessage.value = tr('passwordUnchanged'); return; }
+  syncing.value = true;
+  syncMessage.value = '';
+  try {
+    syncState.value = await invoke('change_sync_password', {
+      currentPassword: currentSyncPassword.value,
+      newPassword: newSyncPassword.value,
+    });
+    currentSyncPassword.value = '';
+    newSyncPassword.value = '';
+    confirmSyncPassword.value = '';
+    syncMessage.value = tr('passwordChanged');
   } catch (error) { syncMessage.value = tr('syncFailed') + String(error); }
   finally { syncing.value = false; }
 }
@@ -434,6 +458,13 @@ onUnmounted(() => { disposed = true; clearInterval(timer); unlisten?.(); });
               <button v-if="syncState?.enabled" type="button" @click="downloadCloud" :disabled="syncing">{{ tr('downloadCloud') }}</button>
               <button v-if="syncState?.enabled" type="button" class="delete" @click="disableCloudSync" :disabled="syncing">{{ tr('disableSync') }}</button>
             </div>
+            <details v-if="syncState?.enabled" class="password-change">
+              <summary>{{ tr('changePassword') }}</summary>
+              <label>{{ tr('currentPassword') }}<input v-model="currentSyncPassword" type="password" autocomplete="current-password" spellcheck="false" :disabled="syncing" /></label>
+              <label>{{ tr('newPassword') }}<input v-model="newSyncPassword" type="password" autocomplete="new-password" spellcheck="false" :disabled="syncing" /></label>
+              <label>{{ tr('confirmPassword') }}<input v-model="confirmSyncPassword" type="password" autocomplete="new-password" spellcheck="false" :disabled="syncing" /></label>
+              <button type="button" @click="changeCloudPassword" :disabled="syncing">{{ tr('changePassword') }}</button>
+            </details>
             <p v-if="syncMessage" class="sync-message" aria-live="polite">{{ syncMessage }}</p>
           </section>
         </div>

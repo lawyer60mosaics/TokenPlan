@@ -140,6 +140,57 @@ final class AppModel: ObservableObject {
         }
     }
 
+    @discardableResult
+    func changeSyncPassword(currentPassword: String, newPassword: String, confirmation: String) async -> Bool {
+        guard !isBusy else { return false }
+        clearStatus()
+        guard isSyncConfigured else {
+            errorMessage = "请先配置云同步"
+            return false
+        }
+        guard newPassword == confirmation else {
+            errorMessage = "两次输入的新密码不一致"
+            return false
+        }
+        guard currentPassword != newPassword else {
+            errorMessage = "新密码不能与当前密码相同"
+            return false
+        }
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            let account = try secretStore.read("username") ?? username
+            try SyncCredentials.validate(username: account, password: currentPassword)
+            try SyncCredentials.validate(username: account, password: newPassword)
+            let currentClient = try SyncClient(username: account, password: currentPassword)
+            let vault = try await currentClient.pull()
+            let plaintext = try crypto.decrypt(vault.envelope, username: account, password: currentPassword)
+            let downloaded = try JSONDecoder().decode([Profile].self, from: plaintext)
+            try profileStore.validate(downloaded)
+
+            _ = try SyncClient(username: account, password: newPassword)
+            let nextEnvelope = try crypto.encrypt(plaintext, username: account, password: newPassword)
+            let nextToken = SyncCredentials.authToken(username: account, password: newPassword)
+            try secretStore.write(newPassword, account: "password-change-check")
+            try secretStore.delete("password-change-check")
+            let nextRevision = try await currentClient.rotateCredentials(
+                newToken: nextToken,
+                envelope: nextEnvelope,
+                revision: vault.revision
+            )
+
+            try secretStore.write(newPassword, account: "password")
+            username = account
+            password = newPassword
+            setRevision(nextRevision)
+            message = "同步密码修改成功，其他设备需要重新登录"
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
     func refreshAll() async {
         guard !isRefreshing else { return }
         isRefreshing = true

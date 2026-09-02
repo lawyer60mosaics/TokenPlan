@@ -3,6 +3,10 @@ import SwiftUI
 struct SyncSettingsView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
+    @State private var currentPassword = ""
+    @State private var newPassword = ""
+    @State private var confirmedPassword = ""
+
     var body: some View {
         NavigationStack {
             Form {
@@ -31,6 +35,33 @@ struct SyncSettingsView: View {
                             .disabled(model.isBusy)
                         Button("停用云同步", role: .destructive) { model.disableSync() }
                             .disabled(model.isBusy)
+                    }
+                }
+                if model.isSyncConfigured {
+                    Section("修改同步密码") {
+                        SecureField("当前密码", text: $currentPassword)
+                            .textContentType(.password)
+                        SecureField("新密码（至少 16 位）", text: $newPassword)
+                            .textContentType(.newPassword)
+                        SecureField("再次输入新密码", text: $confirmedPassword)
+                            .textContentType(.newPassword)
+                        Button("修改密码") {
+                            Task {
+                                if await model.changeSyncPassword(
+                                    currentPassword: currentPassword,
+                                    newPassword: newPassword,
+                                    confirmation: confirmedPassword
+                                ) {
+                                    currentPassword = ""
+                                    newPassword = ""
+                                    confirmedPassword = ""
+                                }
+                            }
+                        }
+                        .disabled(model.isBusy)
+                        Text("修改后，云端配置会使用新密码重新加密。其他设备需要输入新密码重新登录。")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
                 }
                 Section("锁屏与灵动岛") {

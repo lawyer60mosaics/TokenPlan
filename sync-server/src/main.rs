@@ -13,7 +13,7 @@ use std::{
     env,
     net::SocketAddr,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, MutexGuard},
     time::{SystemTime, UNIX_EPOCH},
 };
 use subtle::ConstantTimeEq;
@@ -23,7 +23,11 @@ const MAX_ENVELOPE_FIELD: usize = 350_000;
 
 #[derive(Clone)]
 struct AppState {
-    db: Arc<Mutex<Connection>>,
+    store: Arc<Mutex<Store>>,
+}
+
+struct Store {
+    db: Connection,
     token_hash: [u8; 32],
 }
 
@@ -45,6 +49,13 @@ struct VaultResponse {
 #[derive(Serialize)]
 struct ErrorBody {
     error: &'static str,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RotateCredentialsRequest {
+    new_token: String,
+    envelope: VaultEnvelope,
 }
 
 enum ApiError {
@@ -82,15 +93,19 @@ fn token_hash(value: &str) -> [u8; 32] {
     Sha256::digest(value.as_bytes()).into()
 }
 
-fn authorize(headers: &HeaderMap, state: &AppState) -> Result<(), ApiError> {
+fn authorize<'a>(
+    headers: &HeaderMap,
+    state: &'a AppState,
+) -> Result<MutexGuard<'a, Store>, ApiError> {
     let supplied = headers
         .get(header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.strip_prefix("Bearer "))
         .filter(|value| !value.is_empty())
         .ok_or(ApiError::Unauthorized)?;
-    if bool::from(token_hash(supplied).ct_eq(&state.token_hash)) {
-        Ok(())
+    let store = state.store.lock().map_err(|_| ApiError::Internal)?;
+    if bool::from(token_hash(supplied).ct_eq(&store.token_hash)) {
+        Ok(store)
     } else {
         Err(ApiError::Unauthorized)
     }
@@ -116,21 +131,51 @@ fn initialize_connection(connection: &Connection) -> Result<()> {
              revision INTEGER NOT NULL,
              updated_at INTEGER NOT NULL,
              envelope TEXT NOT NULL
+         );
+         CREATE TABLE IF NOT EXISTS sync_settings (
+             key TEXT PRIMARY KEY,
+             value BLOB NOT NULL
          );",
     )?;
     Ok(())
 }
 
-fn app(connection: Connection, token: &str) -> Router {
-    let state = AppState {
-        db: Arc::new(Mutex::new(connection)),
-        token_hash: token_hash(token),
+fn app(connection: Connection, token: &str) -> Result<Router> {
+    let persisted: Option<Vec<u8>> = connection
+        .query_row(
+            "SELECT value FROM sync_settings WHERE key = 'token_hash'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let persisted = match persisted {
+        Some(value) => value
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("stored authentication hash is invalid"))?,
+        None => {
+            let value = token_hash(token);
+            connection.execute(
+                "INSERT INTO sync_settings (key, value) VALUES ('token_hash', ?1)",
+                params![value.as_slice()],
+            )?;
+            value
+        }
     };
-    Router::new()
+    let state = AppState {
+        store: Arc::new(Mutex::new(Store {
+            db: connection,
+            token_hash: persisted,
+        })),
+    };
+    Ok(Router::new()
         .route("/healthz", get(health))
         .route("/api/v1/vault", get(get_vault).put(put_vault))
+        .route(
+            "/api/v1/vault/credentials",
+            axum::routing::put(rotate_credentials),
+        )
         .layer(DefaultBodyLimit::max(256 * 1024))
-        .with_state(state)
+        .with_state(state))
 }
 
 async fn health() -> impl IntoResponse {
@@ -144,9 +189,9 @@ async fn get_vault(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
-    authorize(&headers, &state)?;
-    let db = state.db.lock().map_err(|_| ApiError::Internal)?;
-    let row: Option<(u64, u64, String)> = db
+    let store = authorize(&headers, &state)?;
+    let row: Option<(u64, u64, String)> = store
+        .db
         .query_row(
             "SELECT revision, updated_at, envelope FROM vault WHERE id = 1",
             [],
@@ -207,7 +252,6 @@ async fn put_vault(
     headers: HeaderMap,
     Json(envelope): Json<VaultEnvelope>,
 ) -> Result<Response, ApiError> {
-    authorize(&headers, &state)?;
     validate_envelope(&envelope)?;
     let expected = parse_revision(&headers)?;
     let serialized = serde_json::to_string(&envelope).map_err(|_| ApiError::Internal)?;
@@ -216,8 +260,9 @@ async fn put_vault(
         .map_err(|_| ApiError::Internal)?
         .as_secs();
 
-    let mut db = state.db.lock().map_err(|_| ApiError::Internal)?;
-    let transaction = db
+    let mut store = authorize(&headers, &state)?;
+    let transaction = store
+        .db
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(|error| {
             warn!(%error, "vault transaction failed");
@@ -262,6 +307,83 @@ async fn put_vault(
     Ok(response)
 }
 
+async fn rotate_credentials(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<RotateCredentialsRequest>,
+) -> Result<Response, ApiError> {
+    validate_envelope(&request.envelope)?;
+    if request.new_token.len() != 43
+        || !request
+            .new_token
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    {
+        return Err(ApiError::Invalid("invalid_new_token"));
+    }
+    let expected = parse_revision(&headers)?;
+    let serialized = serde_json::to_string(&request.envelope).map_err(|_| ApiError::Internal)?;
+    let updated_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| ApiError::Internal)?
+        .as_secs();
+    let next_token_hash = token_hash(&request.new_token);
+
+    let mut store = authorize(&headers, &state)?;
+    let transaction = store
+        .db
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| {
+            warn!(%error, "credential rotation transaction failed");
+            ApiError::Internal
+        })?;
+    let current: u64 = transaction
+        .query_row("SELECT revision FROM vault WHERE id = 1", [], |row| {
+            row.get(0)
+        })
+        .optional()
+        .map_err(|_| ApiError::Internal)?
+        .ok_or(ApiError::Missing)?;
+    if current != expected {
+        return Err(ApiError::Conflict);
+    }
+    let revision = current.checked_add(1).ok_or(ApiError::Internal)?;
+    transaction
+        .execute(
+            "UPDATE vault SET revision = ?1, updated_at = ?2, envelope = ?3 WHERE id = 1",
+            params![revision, updated_at, serialized],
+        )
+        .map_err(|error| {
+            warn!(%error, "vault credential rotation failed");
+            ApiError::Internal
+        })?;
+    transaction
+        .execute(
+            "UPDATE sync_settings SET value = ?1 WHERE key = 'token_hash'",
+            params![next_token_hash.as_slice()],
+        )
+        .map_err(|error| {
+            warn!(%error, "authentication hash rotation failed");
+            ApiError::Internal
+        })?;
+    transaction.commit().map_err(|_| ApiError::Internal)?;
+    store.token_hash = next_token_hash;
+
+    let mut response = (
+        StatusCode::OK,
+        Json(serde_json::json!({"revision": revision, "updated_at": updated_at})),
+    )
+        .into_response();
+    response.headers_mut().insert(
+        header::ETAG,
+        HeaderValue::from_str(&format!("\"{revision}\"")).map_err(|_| ApiError::Internal)?,
+    );
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    Ok(response)
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
@@ -279,7 +401,7 @@ async fn main() -> Result<()> {
         anyhow::bail!("TOKENPLAN_SYNC_TOKEN must contain at least 32 characters");
     }
 
-    let router = app(initialize_database(&database)?, &token);
+    let router = app(initialize_database(&database)?, &token)?;
     let listener = tokio::net::TcpListener::bind(listen).await?;
     info!(%listen, database = %database.display(), "TokenPlan sync API listening");
     axum::serve(listener, router)
@@ -315,7 +437,7 @@ mod tests {
     fn test_app() -> Router {
         let connection = Connection::open_in_memory().unwrap();
         initialize_connection(&connection).unwrap();
-        app(connection, &"x".repeat(40))
+        app(connection, &"x".repeat(40)).unwrap()
     }
 
     fn request(method: &str, path: &str, token: bool, revision: Option<u64>) -> Request<Body> {
@@ -368,6 +490,67 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(conflict.status(), StatusCode::CONFLICT);
+    }
+
+    #[tokio::test]
+    async fn credential_rotation_reencrypts_vault_and_revokes_old_token() {
+        let router = test_app();
+        let created = router
+            .clone()
+            .oneshot(request("PUT", "/api/v1/vault", true, Some(0)))
+            .await
+            .unwrap();
+        assert_eq!(created.status(), StatusCode::OK);
+
+        let new_token = "y".repeat(43);
+        let body = serde_json::json!({
+            "new_token": new_token,
+            "envelope": {
+                "schema_version": 1,
+                "nonce": "new-fictional-nonce",
+                "ciphertext": "new-opaque-ciphertext"
+            }
+        });
+        let rotated = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/api/v1/vault/credentials")
+                    .header(header::AUTHORIZATION, format!("Bearer {}", "x".repeat(40)))
+                    .header(header::IF_MATCH, "\"1\"")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(rotated.status(), StatusCode::OK);
+        assert_eq!(rotated.headers()[header::ETAG], "\"2\"");
+
+        let old_read = router
+            .clone()
+            .oneshot(request("GET", "/api/v1/vault", true, None))
+            .await
+            .unwrap();
+        assert_eq!(old_read.status(), StatusCode::UNAUTHORIZED);
+
+        let new_read = router
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/vault")
+                    .header(header::AUTHORIZATION, format!("Bearer {new_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(new_read.status(), StatusCode::OK);
+        let body = new_read.into_body().collect().await.unwrap().to_bytes();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["revision"], 2);
+        assert_eq!(value["envelope"]["ciphertext"], "new-opaque-ciphertext");
     }
 
     #[tokio::test]

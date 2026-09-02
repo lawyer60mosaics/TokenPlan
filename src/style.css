@@ -20,7 +20,7 @@ html, body, #app { margin: 0; width: 100%; height: 100%; background: transparent
 button, input, select { font: inherit; color: inherit; }
 button { border: 0; cursor: pointer; }
 button:disabled { opacity: .48; cursor: default; }
-button:focus-visible, select:focus-visible, input:focus-visible, [tabindex]:focus-visible { outline: 2px solid #6d5fe4; outline-offset: 2px; }
+button:focus-visible, select:focus-visible, input:focus-visible, summary:focus-visible, [tabindex]:focus-visible { outline: 2px solid #6d5fe4; outline-offset: 2px; }
 
 .app-window {
   width: 100%;
@@ -245,6 +245,10 @@ button:focus-visible, select:focus-visible, input:focus-visible, [tabindex]:focu
 .sync-heading span { color: var(--muted); text-align: right; font-size: 9px; }
 .sync-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .sync-message { margin: 8px 0 0; color: #246a49; font-size: 9px; overflow-wrap: anywhere; }
+.password-change { margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--line); }
+.password-change summary { color: #5144b5; cursor: pointer; font-size: 10px; font-weight: 700; }
+.password-change[open] summary { margin-bottom: 8px; }
+.password-change button { width: 100%; margin-top: 8px; padding: 9px 10px; border-radius: 9px; background: #5c4ed2; color: white; font-size: 10px; font-weight: 700; }
 .form-error { flex: none; max-height: 60px; overflow-y: auto; margin: 6px 0; color: #b52f3b; font-size: 10px; overflow-wrap: anywhere; }
 .settings-actions { flex: none; display: flex; justify-content: flex-end; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
 .settings-actions button { padding: 8px 13px; border-radius: 9px; background: #e7e5ee; font-size: 10px; font-weight: 650; }

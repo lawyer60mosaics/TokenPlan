@@ -20,6 +20,7 @@ mockIPC((command, args) => {
   if (command === 'disable_sync') { syncState = null; return; }
   if (command === 'push_sync') return syncState || { enabled: true, username: 'fixture', revision: 1 };
   if (command === 'pull_sync') return { profiles: structuredClone(profiles), state: syncState || { enabled: true, username: 'fixture', revision: 1 } };
+  if (command === 'change_sync_password') { syncState = { ...(syncState || { enabled: true, username: 'fixture' }), revision: 2 }; return syncState; }
   if (command === 'query_profile') {
     if (args.profile.provider === 'deepseek') {
       balanceQueries++;

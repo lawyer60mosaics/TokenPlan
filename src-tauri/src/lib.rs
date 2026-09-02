@@ -257,6 +257,13 @@ mod commands {
         sync::pull().await
     }
     #[tauri::command]
+    pub async fn change_sync_password(
+        current_password: String,
+        new_password: String,
+    ) -> Result<sync::SyncState, String> {
+        sync::change_password(current_password, new_password).await
+    }
+    #[tauri::command]
     pub fn exit_app(app: tauri::AppHandle) {
         app.exit(0)
     }
@@ -309,6 +316,7 @@ pub fn run() {
             commands::disable_sync,
             commands::push_sync,
             commands::pull_sync,
+            commands::change_sync_password,
             commands::exit_app
         ])
         .run(tauri::generate_context!())
