@@ -1,0 +1,61 @@
+name: Volcengine Coding Plan Prewarm
+
+on:
+  schedule:
+    # GitHub cron uses UTC. Asia/Shanghai is UTC+8 year-round.
+    - cron: "0 0 * * 1-5"
+    - cron: "0 5 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: volcengine-coding-plan-prewarm
+  cancel-in-progress: false
+
+jobs:
+  prewarm:
+    name: Trigger five-hour window
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      ARK_API_KEY: ${{ secrets.VOLCENGINE_CODING_PLAN_API_KEY }}
+      ARK_MODEL: ${{ vars.VOLCENGINE_CODING_PLAN_MODEL || 'ark-code-latest' }}
+    steps:
+      - name: Validate secret
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${ARK_API_KEY}" ]]; then
+            echo "Missing repository secret VOLCENGINE_CODING_PLAN_API_KEY" >&2
+            exit 1
+          fi
+
+      - name: Trigger Volcengine Coding Plan directly
+        shell: bash
+        run: |
+          set -euo pipefail
+          payload=$(jq -cn --arg model "${ARK_MODEL}" '{
+            model: $model,
+            messages: [{role: "user", content: "Reply with OK."}],
+            max_tokens: 1,
+            stream: false
+          }')
+          status=$(curl --silent --show-error \
+            --connect-timeout 10 \
+            --max-time 60 \
+            --max-redirs 0 \
+            --output response.json \
+            --write-out '%{http_code}' \
+            --request POST \
+            --header "Authorization: Bearer ${ARK_API_KEY}" \
+            --header 'Content-Type: application/json' \
+            --data "${payload}" \
+            'https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions')
+          if [[ "${status}" -lt 200 || "${status}" -ge 300 ]]; then
+            echo "Volcengine prewarm failed with HTTP ${status}" >&2
+            jq -r '.error.message // .message // "No error details"' response.json 2>/dev/null | head -c 300 >&2
+            exit 1
+          fi
+          echo "Volcengine Coding Plan prewarm succeeded with HTTP ${status}."

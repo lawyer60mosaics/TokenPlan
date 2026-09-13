@@ -44,6 +44,8 @@ Existing `%APPDATA%/VolcengineTokenPlan/profiles.dat` profiles are read with def
 
 预热使用 Coding Plan 专用地址 `https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions`，默认模型为 `ark-code-latest`。每次发送一个最小请求并最多生成 1 token，因此属于真实套餐调用。查询套餐使用的账号 AK/SK 不能用于预热；需要另填 Coding Plan API Key。该 Key 通过 HTTPS 上传，在服务器使用 XChaCha20-Poly1305 加密保存，查询配置时只返回“是否已配置”，不返回 Key 明文。停用自动预热不会删除已加密保存的 Key。
 
+如需完全绕过自建服务器，可启用 `.github/workflows/volcengine-prewarm.yml`。该 GitHub Actions 工作流在工作日 08:00、13:00（Asia/Shanghai）从 GitHub 云端直接请求火山方舟。仓库必须配置 Actions Secret `VOLCENGINE_CODING_PLAN_API_KEY`；可选变量 `VOLCENGINE_CODING_PLAN_MODEL` 用于覆盖默认模型。使用该方案时，应关闭 TokenPlan 客户端中的服务器自动预热，避免重复调用。
+
 ## Development and verification
 
 ```powershell
