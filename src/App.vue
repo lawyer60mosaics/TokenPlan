@@ -30,6 +30,11 @@ const copy = {
     localSavedSyncFailed: '本地已保存，云同步失败：', syncFailed: '云同步失败：',
     changePassword: '修改同步密码', currentPassword: '当前密码', newPassword: '新密码', confirmPassword: '确认新密码',
     passwordMismatch: '两次输入的新密码不一致', passwordUnchanged: '新密码不能与当前密码相同', passwordChanged: '同步密码修改成功，其他设备需要重新登录',
+    prewarm: '配额预热', prewarmEnabled: '启用工作日自动预热', prewarmSchedule: '上海时区 · 工作日 08:00、13:00 · 30 分钟补偿',
+    prewarmKey: 'Coding Plan API Key', prewarmModel: '套餐模型', prewarmSave: '保存预热设置', prewarmRun: '立即试运行',
+    prewarmKeyStored: '服务器已保存加密 Key；留空不会覆盖', prewarmKeyMissing: '尚未配置 API Key',
+    prewarmCost: '每次预热会真实调用一次 Coding Plan（最多生成 1 token），用于启动 5 小时窗口。Key 经加密存于云服务器且不会回传。',
+    prewarmSaved: '配额预热设置已保存', prewarmSucceeded: '配额预热成功', prewarmFailed: '配额预热失败：', prewarmNever: '尚未执行',
     hint: '每 60 秒自动查询所有启用的配置。', dragFailed: '窗口拖动失败：',
     totalBalance: '总余额', grantedBalance: '赠送余额', toppedUpBalance: '充值余额', balanceAccount: '账户余额',
     available: '● 余额可用', insufficient: '● 余额不足，暂不可调用 API',
@@ -58,6 +63,11 @@ const copy = {
     localSavedSyncFailed: 'Saved locally, but cloud sync failed: ', syncFailed: 'Cloud sync failed: ',
     changePassword: 'Change sync password', currentPassword: 'Current password', newPassword: 'New password', confirmPassword: 'Confirm new password',
     passwordMismatch: 'The new passwords do not match', passwordUnchanged: 'The new password must differ from the current password', passwordChanged: 'Sync password changed; sign in again on other devices',
+    prewarm: 'Quota prewarm', prewarmEnabled: 'Enable weekday auto prewarm', prewarmSchedule: 'Asia/Shanghai · weekdays at 08:00 and 13:00 · 30-minute catch-up',
+    prewarmKey: 'Coding Plan API Key', prewarmModel: 'Plan model', prewarmSave: 'Save prewarm settings', prewarmRun: 'Run now',
+    prewarmKeyStored: 'Encrypted key is stored on the server; leave blank to keep it', prewarmKeyMissing: 'No API key configured',
+    prewarmCost: 'Each prewarm makes one real Coding Plan request (up to 1 generated token) to start the 5-hour window. The key is encrypted on the cloud server and never returned.',
+    prewarmSaved: 'Quota prewarm settings saved', prewarmSucceeded: 'Quota prewarm succeeded', prewarmFailed: 'Quota prewarm failed: ', prewarmNever: 'Never run',
     hint: 'Every enabled profile refreshes automatically every 60 seconds.', dragFailed: 'Window drag failed: ',
     totalBalance: 'Total balance', grantedBalance: 'Granted balance', toppedUpBalance: 'Topped-up balance', balanceAccount: 'Account balance',
     available: '● Balance available', insufficient: '● Insufficient balance for API calls',
@@ -78,6 +88,8 @@ const autostart = ref(false);
 const syncState = ref(null), syncUsername = ref(''), syncPassword = ref('');
 const currentSyncPassword = ref(''), newSyncPassword = ref(''), confirmSyncPassword = ref('');
 const syncMessage = ref(''), syncing = ref(false);
+const prewarmState = ref(null), prewarmEnabled = ref(false), prewarmApiKey = ref(''), prewarmModel = ref('ark-code-latest'), prewarming = ref(false);
+const prewarmModels = ['ark-code-latest', 'doubao-seed-2.0-code', 'doubao-seed-2.0-pro', 'doubao-seed-2.0-lite', 'doubao-seed-code', 'minimax-m2.5', 'glm-4.7', 'deepseek-v3.2', 'kimi-k2.5'];
 const draft = computed(() => drafts.value.find(p => p.id === draftId.value));
 const draftMeta = computed(() => providerInfo(draft.value?.provider));
 const enabledCount = computed(() => profiles.value.filter(profile => profile.enabled).length);
@@ -162,7 +174,43 @@ async function loadSyncState() {
   try {
     syncState.value = await invoke('get_sync_state');
     if (syncState.value?.username) syncUsername.value = syncState.value.username;
+    if (syncState.value?.enabled) await loadPrewarm();
   } catch (error) { syncMessage.value = tr('syncFailed') + String(error); }
+}
+async function loadPrewarm() {
+  try {
+    prewarmState.value = await invoke('get_prewarm');
+    prewarmEnabled.value = prewarmState.value.enabled;
+    prewarmModel.value = prewarmState.value.model;
+  } catch (error) { syncMessage.value = tr('prewarmFailed') + String(error); }
+}
+async function savePrewarm() {
+  if (prewarming.value) return;
+  prewarming.value = true;
+  syncMessage.value = '';
+  try {
+    prewarmState.value = await invoke('save_prewarm', { enabled: prewarmEnabled.value, apiKey: prewarmApiKey.value, model: prewarmModel.value });
+    prewarmApiKey.value = '';
+    syncMessage.value = tr('prewarmSaved');
+  } catch (error) { syncMessage.value = tr('prewarmFailed') + String(error); }
+  finally { prewarming.value = false; }
+}
+async function runPrewarm() {
+  if (prewarming.value) return;
+  prewarming.value = true;
+  syncMessage.value = '';
+  try {
+    const result = await invoke('run_prewarm');
+    prewarmState.value = { ...prewarmState.value, lastRun: result };
+    syncMessage.value = result.success ? tr('prewarmSucceeded') : tr('prewarmFailed') + (result.error || `HTTP ${result.httpStatus || '—'}`);
+  } catch (error) { syncMessage.value = tr('prewarmFailed') + String(error); }
+  finally { prewarming.value = false; }
+}
+function prewarmRunLabel() {
+  const run = prewarmState.value?.lastRun;
+  if (!run) return tr('prewarmNever');
+  const time = formatCompactTime(run.triggeredAt * 1000);
+  return `${run.success ? '✓' : '⚠'} ${time}${run.httpStatus ? ` · HTTP ${run.httpStatus}` : ''}`;
 }
 async function configureCloudSync() {
   if (syncing.value) return;
@@ -464,6 +512,16 @@ onUnmounted(() => { disposed = true; clearInterval(timer); unlisten?.(); });
               <label>{{ tr('newPassword') }}<input v-model="newSyncPassword" type="password" autocomplete="new-password" spellcheck="false" :disabled="syncing" /></label>
               <label>{{ tr('confirmPassword') }}<input v-model="confirmSyncPassword" type="password" autocomplete="new-password" spellcheck="false" :disabled="syncing" /></label>
               <button type="button" @click="changeCloudPassword" :disabled="syncing">{{ tr('changePassword') }}</button>
+            </details>
+            <details v-if="syncState?.enabled" class="password-change prewarm-settings" open>
+              <summary>{{ tr('prewarm') }}</summary>
+              <label class="switch-row"><input v-model="prewarmEnabled" type="checkbox" :disabled="prewarming" />{{ tr('prewarmEnabled') }}</label>
+              <small>{{ tr('prewarmSchedule') }}</small>
+              <label>{{ tr('prewarmModel') }}<select v-model="prewarmModel" :disabled="prewarming"><option v-for="model in prewarmModels" :key="model" :value="model">{{ model }}</option></select></label>
+              <label>{{ tr('prewarmKey') }}<input v-model="prewarmApiKey" type="password" autocomplete="off" spellcheck="false" :placeholder="prewarmState?.hasApiKey ? tr('prewarmKeyStored') : tr('prewarmKeyMissing')" :disabled="prewarming" /></label>
+              <small>{{ tr('prewarmCost') }}</small>
+              <p class="prewarm-last">{{ prewarmRunLabel() }}</p>
+              <div class="sync-actions"><button type="button" @click="savePrewarm" :disabled="prewarming">{{ tr('prewarmSave') }}</button><button type="button" @click="runPrewarm" :disabled="prewarming || !prewarmState?.hasApiKey">{{ tr('prewarmRun') }}</button></div>
             </details>
             <p v-if="syncMessage" class="sync-message" aria-live="polite">{{ syncMessage }}</p>
           </section>

@@ -264,6 +264,22 @@ mod commands {
         sync::change_password(current_password, new_password).await
     }
     #[tauri::command]
+    pub async fn get_prewarm() -> Result<sync::PrewarmState, String> {
+        sync::get_prewarm().await
+    }
+    #[tauri::command]
+    pub async fn save_prewarm(
+        enabled: bool,
+        api_key: String,
+        model: String,
+    ) -> Result<sync::PrewarmState, String> {
+        sync::save_prewarm(enabled, api_key, model).await
+    }
+    #[tauri::command]
+    pub async fn run_prewarm() -> Result<sync::PrewarmRun, String> {
+        sync::run_prewarm().await
+    }
+    #[tauri::command]
     pub fn exit_app(app: tauri::AppHandle) {
         app.exit(0)
     }
@@ -317,6 +333,9 @@ pub fn run() {
             commands::push_sync,
             commands::pull_sync,
             commands::change_sync_password,
+            commands::get_prewarm,
+            commands::save_prewarm,
+            commands::run_prewarm,
             commands::exit_app
         ])
         .run(tauri::generate_context!())

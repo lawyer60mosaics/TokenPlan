@@ -130,4 +130,34 @@ final class SyncClientTests: XCTestCase {
         )
         XCTAssertEqual(revision, 8)
     }
+
+    func testPrewarmConfigurationUsesDedicatedEndpointAndDecodesRedactedState() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        MockURLProtocol.handler = { request in
+            XCTAssertEqual(request.url?.absoluteString, "https://tokenplan.xuwenxu.com/api/v1/prewarm")
+            XCTAssertEqual(request.httpMethod, "PUT")
+            XCTAssertNotNil(request.value(forHTTPHeaderField: "Authorization"))
+            let body = try self.bodyData(from: request)
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            XCTAssertEqual(json["enabled"] as? Bool, true)
+            XCTAssertEqual(json["api_key"] as? String, "fictional-coding-key")
+            XCTAssertEqual(json["model"] as? String, "ark-code-latest")
+            let response = HTTPURLResponse(
+                url: try XCTUnwrap(request.url), statusCode: 200,
+                httpVersion: nil, headerFields: nil
+            )!
+            return (response, Data(#"{"enabled":true,"model":"ark-code-latest","schedule":"工作日 08:00、13:00","timezone":"Asia/Shanghai","has_api_key":true,"last_run":null}"#.utf8))
+        }
+        let client = try SyncClient(username: "tokenplan", password: "correct-horse-1234", session: session)
+        let state = try await client.savePrewarm(
+            enabled: true,
+            apiKey: "fictional-coding-key",
+            model: "ark-code-latest"
+        )
+        XCTAssertTrue(state.enabled)
+        XCTAssertTrue(state.hasAPIKey)
+        XCTAssertNil(state.lastRun)
+    }
 }

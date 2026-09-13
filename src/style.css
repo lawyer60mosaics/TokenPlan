@@ -249,6 +249,9 @@ button:focus-visible, select:focus-visible, input:focus-visible, summary:focus-v
 .password-change summary { color: #5144b5; cursor: pointer; font-size: 10px; font-weight: 700; }
 .password-change[open] summary { margin-bottom: 8px; }
 .password-change button { width: 100%; margin-top: 8px; padding: 9px 10px; border-radius: 9px; background: #5c4ed2; color: white; font-size: 10px; font-weight: 700; }
+.prewarm-settings select { width: 100%; min-height: 34px; padding: 0 8px; border: 1px solid #d4d1df; border-radius: 8px; background: #fff; font-size: 10px; }
+.prewarm-settings .sync-actions button { width: auto; margin-top: 0; }
+.prewarm-last { margin: 8px 0 0; color: var(--muted); font-size: 9px; }
 .form-error { flex: none; max-height: 60px; overflow-y: auto; margin: 6px 0; color: #b52f3b; font-size: 10px; overflow-wrap: anywhere; }
 .settings-actions { flex: none; display: flex; justify-content: flex-end; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
 .settings-actions button { padding: 8px 13px; border-radius: 9px; background: #e7e5ee; font-size: 10px; font-weight: 650; }

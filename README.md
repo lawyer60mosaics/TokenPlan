@@ -38,6 +38,12 @@ All enabled plans refresh every 60 seconds with per-profile caches and request d
 
 Existing `%APPDATA%/VolcengineTokenPlan/profiles.dat` profiles are read with defaults as Volcengine, preserving AK/SK. Saving creates an encrypted `profiles.dat.bak`, then replaces the encrypted file using a temporary file. No provider credentials are imported from cc-switch.
 
+## 火山方舟配额预热 / Volcengine quota prewarm
+
+配置云同步后，可在 Windows 或 iOS 的云同步设置中启用配额预热。云服务器会按 `Asia/Shanghai` 时区在工作日 08:00 和 13:00 各执行一次，并在服务重启或短时故障后提供 30 分钟补执行窗口；相同时间槽只执行一次。也可以使用“立即试运行”验证 Key 和模型。
+
+预热使用 Coding Plan 专用地址 `https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions`，默认模型为 `ark-code-latest`。每次发送一个最小请求并最多生成 1 token，因此属于真实套餐调用。查询套餐使用的账号 AK/SK 不能用于预热；需要另填 Coding Plan API Key。该 Key 通过 HTTPS 上传，在服务器使用 XChaCha20-Poly1305 加密保存，查询配置时只返回“是否已配置”，不返回 Key 明文。停用自动预热不会删除已加密保存的 Key。
+
 ## Development and verification
 
 ```powershell

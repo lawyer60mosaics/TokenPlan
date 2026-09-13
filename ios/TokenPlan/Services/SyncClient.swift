@@ -27,6 +27,47 @@ struct UpdateResponse: Codable {
     let revision: UInt64
 }
 
+struct PrewarmRun: Codable, Equatable, Sendable {
+    let id: UInt64
+    let triggeredAt: UInt64
+    let source: String
+    let success: Bool
+    let httpStatus: Int?
+    let error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, source, success, error
+        case triggeredAt = "triggered_at"
+        case httpStatus = "http_status"
+    }
+}
+
+struct PrewarmState: Codable, Equatable, Sendable {
+    let enabled: Bool
+    let model: String
+    let schedule: String
+    let timezone: String
+    let hasAPIKey: Bool
+    let lastRun: PrewarmRun?
+
+    enum CodingKeys: String, CodingKey {
+        case enabled, model, schedule, timezone
+        case hasAPIKey = "has_api_key"
+        case lastRun = "last_run"
+    }
+}
+
+private struct PrewarmConfigRequest: Codable {
+    let enabled: Bool
+    let apiKey: String?
+    let model: String
+
+    enum CodingKeys: String, CodingKey {
+        case enabled, model
+        case apiKey = "api_key"
+    }
+}
+
 private struct RotateCredentialsRequest: Codable {
     let newToken: String
     let envelope: VaultEnvelope
@@ -96,12 +137,59 @@ struct SyncClient {
         return try JSONDecoder().decode(UpdateResponse.self, from: data).revision
     }
 
+    func getPrewarm() async throws -> PrewarmState {
+        var request = authorizedRequest(url: prewarmURL)
+        request.setValue("no-store", forHTTPHeaderField: "Cache-Control")
+        let (data, response) = try await session.data(for: request)
+        try validate(response, allowing: [200])
+        return try JSONDecoder().decode(PrewarmState.self, from: data)
+    }
+
+    func savePrewarm(enabled: Bool, apiKey: String, model: String) async throws -> PrewarmState {
+        var request = authorizedRequest(url: prewarmURL)
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(
+            PrewarmConfigRequest(
+                enabled: enabled,
+                apiKey: apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : apiKey,
+                model: model
+            )
+        )
+        let (data, response) = try await session.data(for: request)
+        try validate(response, allowing: [200])
+        return try JSONDecoder().decode(PrewarmState.self, from: data)
+    }
+
+    func runPrewarm() async throws -> PrewarmRun {
+        var request = authorizedRequest(url: prewarmRunURL)
+        request.httpMethod = "POST"
+        let (data, response) = try await session.data(for: request)
+        try validate(response, allowing: [200])
+        return try JSONDecoder().decode(PrewarmRun.self, from: data)
+    }
+
+    private func authorizedRequest(url: URL) -> URLRequest {
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 30
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        return request
+    }
+
     private var vaultURL: URL {
         SyncCredentials.endpoint.appendingPathComponent("api/v1/vault")
     }
 
     private var credentialsURL: URL {
         SyncCredentials.endpoint.appendingPathComponent("api/v1/vault/credentials")
+    }
+
+    private var prewarmURL: URL {
+        SyncCredentials.endpoint.appendingPathComponent("api/v1/prewarm")
+    }
+
+    private var prewarmRunURL: URL {
+        SyncCredentials.endpoint.appendingPathComponent("api/v1/prewarm/run")
     }
 
     private func validate(_ response: URLResponse, allowing statuses: Set<Int>) throws {

@@ -6,6 +6,13 @@ struct SyncSettingsView: View {
     @State private var currentPassword = ""
     @State private var newPassword = ""
     @State private var confirmedPassword = ""
+    @State private var prewarmAPIKey = ""
+
+    private let prewarmModels = [
+        "ark-code-latest", "doubao-seed-2.0-code", "doubao-seed-2.0-pro",
+        "doubao-seed-2.0-lite", "doubao-seed-code", "minimax-m2.5",
+        "glm-4.7", "deepseek-v3.2", "kimi-k2.5"
+    ]
 
     var body: some View {
         NavigationStack {
@@ -63,6 +70,44 @@ struct SyncSettingsView: View {
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
+                    Section("配额预热") {
+                        Toggle("启用工作日自动预热", isOn: $model.prewarmEnabled)
+                        LabeledContent("时间", value: "工作日 08:00、13:00")
+                        LabeledContent("时区", value: "Asia/Shanghai")
+                        Picker("套餐模型", selection: $model.prewarmModel) {
+                            ForEach(prewarmModels, id: \.self) { Text($0).tag($0) }
+                        }
+                        SecureField(
+                            model.prewarmState?.hasAPIKey == true ? "已加密保存；留空不覆盖" : "Coding Plan API Key",
+                            text: $prewarmAPIKey
+                        )
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        Button("保存预热设置") {
+                            Task {
+                                if await model.savePrewarm(apiKey: prewarmAPIKey) {
+                                    prewarmAPIKey = ""
+                                }
+                            }
+                        }
+                        .disabled(model.isBusy)
+                        Button("立即试运行") { Task { await model.runPrewarm() } }
+                            .disabled(model.isBusy || model.prewarmState?.hasAPIKey != true)
+                        if let run = model.prewarmState?.lastRun {
+                            LabeledContent("最近执行") {
+                                Label(
+                                    Date(timeIntervalSince1970: TimeInterval(run.triggeredAt)).formatted(date: .abbreviated, time: .shortened),
+                                    systemImage: run.success ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"
+                                )
+                                .foregroundStyle(run.success ? Color.green : Color.orange)
+                            }
+                        } else {
+                            LabeledContent("最近执行", value: "尚未执行")
+                        }
+                        Text("每次会真实调用一次火山方舟 Coding Plan，最多生成 1 token，用于启动 5 小时窗口。API Key 经加密存于云服务器且不会回传；错过计划时间 30 分钟内会自动补执行。")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 Section("锁屏与灵动岛") {
                     LabeledContent("实时活动", value: model.isLiveActivityActive ? "运行中" : "未启动")
@@ -114,6 +159,11 @@ struct SyncSettingsView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("完成") { dismiss() }
                 }
+            }
+        }
+        .task {
+            if model.isSyncConfigured && model.prewarmState == nil {
+                await model.loadPrewarm()
             }
         }
     }

@@ -16,6 +16,9 @@ final class AppModel: ObservableObject {
     @Published var isLiveActivityActive = false
     @Published var isWidgetSharingAvailable = false
     @Published var widgetSharingStatus = "检测中"
+    @Published var prewarmState: PrewarmState?
+    @Published var prewarmEnabled = false
+    @Published var prewarmModel = "ark-code-latest"
     @Published var message = ""
     @Published var errorMessage = ""
 
@@ -255,6 +258,68 @@ final class AppModel: ObservableObject {
             revision = 0
             isSyncConfigured = false
             message = "已停用云同步，本地套餐未删除"
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func loadPrewarm() async {
+        guard isSyncConfigured, !isBusy else { return }
+        clearStatus()
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            let state = try await configuredClient().getPrewarm()
+            prewarmState = state
+            prewarmEnabled = state.enabled
+            prewarmModel = state.model
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func savePrewarm(apiKey: String) async -> Bool {
+        guard isSyncConfigured, !isBusy else { return false }
+        clearStatus()
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            let state = try await configuredClient().savePrewarm(
+                enabled: prewarmEnabled,
+                apiKey: apiKey,
+                model: prewarmModel
+            )
+            prewarmState = state
+            message = "配额预热设置已保存"
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    func runPrewarm() async {
+        guard isSyncConfigured, !isBusy else { return }
+        clearStatus()
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            let run = try await configuredClient().runPrewarm()
+            if let current = prewarmState {
+                prewarmState = PrewarmState(
+                    enabled: current.enabled,
+                    model: current.model,
+                    schedule: current.schedule,
+                    timezone: current.timezone,
+                    hasAPIKey: current.hasAPIKey,
+                    lastRun: run
+                )
+            }
+            if run.success {
+                message = "配额预热成功"
+            } else {
+                errorMessage = "配额预热失败：\(run.error ?? "未知错误")"
+            }
         } catch {
             errorMessage = error.localizedDescription
         }

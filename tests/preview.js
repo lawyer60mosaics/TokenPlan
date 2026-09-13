@@ -6,6 +6,7 @@ import { newProfile, providers } from '../src/providers.js';
 let profiles = providers.map(p => ({ ...newProfile(p.id), id: p.id, api_key: 'fictional-api', access_key: 'fictional-ak', secret_key: 'fictional-sk', organization_id: 'fictional-org', project_id: 'fictional-project', base_url: 'https://api.zenmux.com/usage' }));
 let startup = false;
 let syncState = null;
+let prewarmState = { enabled: false, model: 'ark-code-latest', schedule: '工作日 08:00、13:00', timezone: 'Asia/Shanghai', hasApiKey: false, lastRun: null };
 // URL-only fixture scenarios; never bundled with the application.
 const balanceScenario = new URLSearchParams(location.search).get('balance');
 let balanceQueries = 0;
@@ -21,6 +22,9 @@ mockIPC((command, args) => {
   if (command === 'push_sync') return syncState || { enabled: true, username: 'fixture', revision: 1 };
   if (command === 'pull_sync') return { profiles: structuredClone(profiles), state: syncState || { enabled: true, username: 'fixture', revision: 1 } };
   if (command === 'change_sync_password') { syncState = { ...(syncState || { enabled: true, username: 'fixture' }), revision: 2 }; return syncState; }
+  if (command === 'get_prewarm') return prewarmState;
+  if (command === 'save_prewarm') { prewarmState = { ...prewarmState, enabled: args.enabled, model: args.model, hasApiKey: prewarmState.hasApiKey || !!args.apiKey }; return prewarmState; }
+  if (command === 'run_prewarm') { const result = { id: 1, triggeredAt: Math.floor(Date.now() / 1000), source: 'manual', success: true, httpStatus: 200, error: null }; prewarmState = { ...prewarmState, lastRun: result }; return result; }
   if (command === 'query_profile') {
     if (args.profile.provider === 'deepseek') {
       balanceQueries++;

@@ -61,6 +61,81 @@ struct UpdateResponse {
     revision: u64,
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrewarmRun {
+    id: u64,
+    triggered_at: u64,
+    source: String,
+    success: bool,
+    http_status: Option<u16>,
+    error: Option<String>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrewarmState {
+    enabled: bool,
+    model: String,
+    schedule: String,
+    timezone: String,
+    has_api_key: bool,
+    last_run: Option<PrewarmRun>,
+}
+
+#[derive(Deserialize)]
+struct ServerPrewarmRun {
+    id: u64,
+    triggered_at: u64,
+    source: String,
+    success: bool,
+    http_status: Option<u16>,
+    error: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ServerPrewarmState {
+    enabled: bool,
+    model: String,
+    schedule: String,
+    timezone: String,
+    has_api_key: bool,
+    last_run: Option<ServerPrewarmRun>,
+}
+
+#[derive(Serialize)]
+struct PrewarmConfigRequest<'a> {
+    enabled: bool,
+    api_key: Option<&'a str>,
+    model: &'a str,
+}
+
+impl From<ServerPrewarmRun> for PrewarmRun {
+    fn from(value: ServerPrewarmRun) -> Self {
+        Self {
+            id: value.id,
+            triggered_at: value.triggered_at,
+            source: value.source,
+            success: value.success,
+            http_status: value.http_status,
+            error: value.error,
+        }
+    }
+}
+
+impl From<ServerPrewarmState> for PrewarmState {
+    fn from(value: ServerPrewarmState) -> Self {
+        Self {
+            enabled: value.enabled,
+            model: value.model,
+            schedule: value.schedule,
+            timezone: value.timezone,
+            has_api_key: value.has_api_key,
+            last_run: value.last_run.map(PrewarmRun::from),
+        }
+    }
+}
+
 #[derive(Serialize)]
 struct RotateCredentialsRequest {
     new_token: String,
@@ -173,6 +248,16 @@ fn vault_url() -> Result<Url, String> {
 fn credentials_url() -> Result<Url, String> {
     let mut url = vault_url()?;
     url.set_path("/api/v1/vault/credentials");
+    Ok(url)
+}
+
+fn prewarm_url(run: bool) -> Result<Url, String> {
+    let mut url = vault_url()?;
+    url.set_path(if run {
+        "/api/v1/prewarm/run"
+    } else {
+        "/api/v1/prewarm"
+    });
     Ok(url)
 }
 
@@ -428,6 +513,97 @@ pub async fn change_password(
     Ok(SyncState::from(&next))
 }
 
+pub async fn get_prewarm() -> Result<PrewarmState, String> {
+    let config = load_config()?.ok_or("Cloud sync is not configured / 尚未配置云同步")?;
+    let response = client()?
+        .get(prewarm_url(false)?)
+        .bearer_auth(auth_token(&config))
+        .send()
+        .await
+        .map_err(|_| "Prewarm request failed / 配额预热请求失败")?;
+    if response.status() == StatusCode::UNAUTHORIZED {
+        return Err("Cloud account or password was rejected / 云同步账号或密码错误".into());
+    }
+    if !response.status().is_success() {
+        return Err(format!(
+            "Prewarm request failed (HTTP {}) / 配额预热请求失败",
+            response.status().as_u16()
+        ));
+    }
+    response
+        .json::<ServerPrewarmState>()
+        .await
+        .map(PrewarmState::from)
+        .map_err(|_| "Invalid prewarm response / 配额预热响应无效".into())
+}
+
+pub async fn save_prewarm(
+    enabled: bool,
+    api_key: String,
+    model: String,
+) -> Result<PrewarmState, String> {
+    let config = load_config()?.ok_or("Cloud sync is not configured / 尚未配置云同步")?;
+    let key = api_key.trim();
+    let request = PrewarmConfigRequest {
+        enabled,
+        api_key: (!key.is_empty()).then_some(key),
+        model: model.trim(),
+    };
+    let response = client()?
+        .put(prewarm_url(false)?)
+        .bearer_auth(auth_token(&config))
+        .json(&request)
+        .send()
+        .await
+        .map_err(|_| "Prewarm request failed / 配额预热请求失败")?;
+    if response.status() == StatusCode::BAD_REQUEST {
+        return Err(
+            "Check the Coding Plan API Key and model / 请检查 Coding Plan API Key 和模型".into(),
+        );
+    }
+    if response.status() == StatusCode::UNAUTHORIZED {
+        return Err("Cloud account or password was rejected / 云同步账号或密码错误".into());
+    }
+    if !response.status().is_success() {
+        return Err(format!(
+            "Prewarm update failed (HTTP {}) / 配额预热保存失败",
+            response.status().as_u16()
+        ));
+    }
+    response
+        .json::<ServerPrewarmState>()
+        .await
+        .map(PrewarmState::from)
+        .map_err(|_| "Invalid prewarm response / 配额预热响应无效".into())
+}
+
+pub async fn run_prewarm() -> Result<PrewarmRun, String> {
+    let config = load_config()?.ok_or("Cloud sync is not configured / 尚未配置云同步")?;
+    let response = client()?
+        .post(prewarm_url(true)?)
+        .bearer_auth(auth_token(&config))
+        .send()
+        .await
+        .map_err(|_| "Prewarm request failed / 配额预热请求失败")?;
+    if response.status() == StatusCode::NOT_FOUND {
+        return Err("Configure prewarm first / 请先配置配额预热".into());
+    }
+    if response.status() == StatusCode::UNAUTHORIZED {
+        return Err("Cloud account or password was rejected / 云同步账号或密码错误".into());
+    }
+    if !response.status().is_success() {
+        return Err(format!(
+            "Prewarm run failed (HTTP {}) / 配额预热执行失败",
+            response.status().as_u16()
+        ));
+    }
+    response
+        .json::<ServerPrewarmRun>()
+        .await
+        .map(PrewarmRun::from)
+        .map_err(|_| "Invalid prewarm response / 配额预热响应无效".into())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -453,6 +629,14 @@ mod tests {
         assert_eq!(
             credentials_url().unwrap().as_str(),
             "https://tokenplan.xuwenxu.com/api/v1/vault/credentials"
+        );
+        assert_eq!(
+            prewarm_url(false).unwrap().as_str(),
+            "https://tokenplan.xuwenxu.com/api/v1/prewarm"
+        );
+        assert_eq!(
+            prewarm_url(true).unwrap().as_str(),
+            "https://tokenplan.xuwenxu.com/api/v1/prewarm/run"
         );
         assert!(validate_credentials("tokenplan", "1234567890abcdef").is_ok());
         assert!(validate_credentials("bad account", "1234567890abcdef").is_err());
