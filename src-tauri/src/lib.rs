@@ -1,6 +1,7 @@
 mod coding_plan;
 mod deepseek;
 mod http_client;
+mod integrations;
 mod profiles;
 mod subscription;
 mod sync;
@@ -280,6 +281,20 @@ mod commands {
         sync::run_prewarm().await
     }
     #[tauri::command]
+    pub fn load_integrations() -> Result<integrations::IntegrationSettings, String> {
+        integrations::load()
+    }
+    #[tauri::command]
+    pub fn save_integrations(
+        settings: integrations::IntegrationSettings,
+    ) -> Result<integrations::IntegrationSettings, String> {
+        integrations::save(settings)
+    }
+    #[tauri::command]
+    pub async fn test_notification(kind: String, webhook: String) -> Result<String, String> {
+        integrations::test_notification(kind, webhook).await
+    }
+    #[tauri::command]
     pub fn exit_app(app: tauri::AppHandle) {
         app.exit(0)
     }
@@ -336,6 +351,9 @@ pub fn run() {
             commands::get_prewarm,
             commands::save_prewarm,
             commands::run_prewarm,
+            commands::load_integrations,
+            commands::save_integrations,
+            commands::test_notification,
             commands::exit_app
         ])
         .run(tauri::generate_context!())

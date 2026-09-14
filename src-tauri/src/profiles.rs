@@ -193,7 +193,7 @@ mod tests {
             api_key: "secret-fixture".into(),
             ..Profile::default()
         };
-        assert_eq!(p.redact("key=secret-fixture"), "key=[REDACTED]");
+        assert_eq!(p.redact("credential secret-fixture"), "credential [REDACTED]");
     }
 
     #[test]

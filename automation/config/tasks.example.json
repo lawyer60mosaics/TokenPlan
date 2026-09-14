@@ -1,0 +1,34 @@
+{
+  "timezone": "Asia/Shanghai",
+  "tasks": [
+    {
+      "id": "volcengine-prewarm",
+      "type": "http-json",
+      "enabled": true,
+      "schedule": ["0 8 * * 1-5", "0 13 * * 1-5"],
+      "secretEnv": "VOLCENGINE_CODING_PLAN_API_KEY",
+      "endpoint": "https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions",
+      "method": "POST",
+      "body": {
+        "modelEnv": "VOLCENGINE_CODING_PLAN_MODEL",
+        "defaultModel": "ark-code-latest",
+        "messages": [{"role": "user", "content": "Reply with OK."}],
+        "max_tokens": 1,
+        "stream": false
+      },
+      "timeoutMs": 60000,
+      "retries": 2
+    },
+    {
+      "id": "future-http-health-check",
+      "type": "http-json",
+      "enabled": false,
+      "schedule": ["0 */10 * * * *"],
+      "secretEnv": "HEALTH_CHECK_TOKEN",
+      "endpoint": "https://example.invalid/health",
+      "method": "GET",
+      "timeoutMs": 10000,
+      "retries": 1
+    }
+  ]
+}

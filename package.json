@@ -1,12 +1,13 @@
 {
   "name": "volcengine-token-plan",
   "private": true,
-  "version": "0.4.0",
+  "version": "0.8.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "test": "node --test src/providers.test.js",
+    "task:run": "node automation/local/run-task.mjs",
     "tauri": "tauri"
   },
   "devDependencies": {

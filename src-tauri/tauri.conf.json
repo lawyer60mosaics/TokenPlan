@@ -1,1 +1,36 @@
-{"productName":"TokenPlan","version":"0.4.0","identifier":"com.local.volcengine-token-plan","build":{"beforeDevCommand":"npm run dev","devUrl":"http://localhost:1420","beforeBuildCommand":"npm run build","frontendDist":"../dist"},"app":{"windows":[{"label":"main","title":"TokenPlan","width":480,"height":720,"minWidth":400,"minHeight":560,"resizable":true,"decorations":false,"transparent":true,"alwaysOnTop":false,"skipTaskbar":false,"shadow":true,"center":true}],"security":{"csp":null}},"bundle":{"active":false}}
+{
+  "productName": "TokenPlan",
+  "version": "0.8.0",
+  "identifier": "com.local.volcengine-token-plan",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "TokenPlan",
+        "width": 1040,
+        "height": 760,
+        "minWidth": 820,
+        "minHeight": 600,
+        "resizable": true,
+        "decorations": false,
+        "transparent": false,
+        "alwaysOnTop": false,
+        "skipTaskbar": false,
+        "shadow": true,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": false
+  }
+}

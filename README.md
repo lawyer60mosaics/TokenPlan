@@ -46,6 +46,14 @@ Existing `%APPDATA%/VolcengineTokenPlan/profiles.dat` profiles are read with def
 
 如需完全绕过自建服务器，可启用 `.github/workflows/volcengine-prewarm.yml`。该 GitHub Actions 工作流在工作日 08:00、13:00（Asia/Shanghai）从 GitHub 云端直接请求火山方舟。仓库必须配置 Actions Secret `VOLCENGINE_CODING_PLAN_API_KEY`；可选变量 `VOLCENGINE_CODING_PLAN_MODEL` 用于覆盖默认模型。使用该方案时，应关闭 TokenPlan 客户端中的服务器自动预热，避免重复调用。
 
+### 多云 Serverless 部署（可选）
+
+`serverless/aliyun-fc` 和 `serverless/tencent-scf` 分别集成了 Serverless Framework 的阿里云 FC、腾讯云 SCF 插件。两个服务都执行同一个最小火山方舟预热请求，默认只在 GitHub Actions 手动确认后部署，不会自动产生云函数资源。使用仓库工作流 `Deploy TokenPlan Serverless provider`，选择 `aliyun` 或 `tencent`，并将确认字段填写为 `DEPLOY`。
+
+部署前需要配置对应的 GitHub Actions Secrets：阿里云使用 `ALIYUN_ACCESS_KEY_ID`、`ALIYUN_ACCESS_KEY_SECRET`、`ALIYUN_ACCOUNT_ID`；腾讯云使用 `TENCENT_SECRET_ID`、`TENCENT_SECRET_KEY`、`TENCENT_APP_ID`。两者共用 `VOLCENGINE_CODING_PLAN_API_KEY`。部署完成后，定时触发器建议在对应云控制台配置为北京时间工作日 08:00 和 13:00；插件只负责函数部署，避免不同插件版本对 Cron 格式的差异。
+
+更通用的自动化代码在 `automation/`：`automation/tasks/` 放业务任务，`automation/local/` 是本地运行入口，GitHub 工作流和两个云函数共享同一个任务定义。以后新增备份、健康检查、通知等场景时，只需新增任务模块和对应平台适配层。
+
 ## Development and verification
 
 ```powershell

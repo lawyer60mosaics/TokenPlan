@@ -278,13 +278,15 @@ private struct WidgetEmptyView: View {
             Text(WidgetSnapshotStore.isAppGroupAvailable ? "尚未共享套餐" : "签名权限缺失")
                 .font(.headline)
             Text(WidgetSnapshotStore.isAppGroupAvailable
-                 ? "打开 TokenPlan 后刷新套餐"
-                 : "重签名时需保留 App Group")
+                 ? "打开 TokenPlan → 添加套餐 → 刷新用量"
+                 : "主程序和小组件重签名时都要保留 App Group")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
         }
         .padding()
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("点击可打开 TokenPlan 查看设置说明")
     }
 }
 

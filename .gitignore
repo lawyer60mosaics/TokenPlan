@@ -1,6 +1,8 @@
 # Dependencies and generated builds
 node_modules/
 dist/
+outputs/
+work/
 src-tauri/target/
 src-tauri/gen/
 sync-server/target/
@@ -14,6 +16,8 @@ sync-server/target/
 *.pem
 *.key
 *.pfx
+*.ipa
+*.exe
 credentials*.json
 profiles*.json
 

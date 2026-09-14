@@ -4,12 +4,16 @@ struct ContentView: View {
     @EnvironmentObject private var model: AppModel
     @State private var editingProfile: Profile?
     @State private var showingSync = false
+    @State private var showingHelp = false
 
     var body: some View {
         NavigationStack {
             Group {
                 if model.profiles.isEmpty {
-                    EmptyPlansView { editingProfile = Profile() }
+                    EmptyPlansView(
+                        add: { editingProfile = Profile() },
+                        sync: { showingSync = true }
+                    )
                 } else {
                     plansList
                 }
@@ -19,11 +23,18 @@ struct ContentView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button { showingSync = true } label: {
-                        Image(systemName: model.isSyncConfigured ? "icloud.fill" : "icloud")
+                        Label("云同步", systemImage: model.isSyncConfigured ? "icloud.fill" : "icloud")
                     }
                     .accessibilityLabel("云同步")
+                    .accessibilityHint("设置账号密码、定时任务、小组件和灵动岛")
                 }
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
+                    Button { showingHelp = true } label: {
+                        Image(systemName: "questionmark.circle")
+                    }
+                    .accessibilityLabel("使用帮助")
+                    .accessibilityHint("查看添加套餐、同步和小组件的中文说明")
+
                     Button { Task { await model.refreshAll() } } label: {
                         if model.isRefreshing {
                             ProgressView().controlSize(.small)
@@ -33,11 +44,13 @@ struct ContentView: View {
                     }
                     .disabled(model.isRefreshing)
                     .accessibilityLabel("刷新套餐用量")
+                    .accessibilityHint("立即查询所有已启用套餐的最新用量")
 
                     Button { editingProfile = Profile() } label: {
                         Image(systemName: "plus")
                     }
                     .accessibilityLabel("新增套餐")
+                    .accessibilityHint("添加一个新的 AI 套餐账号")
                 }
             }
             .sheet(item: $editingProfile) { profile in
@@ -45,6 +58,9 @@ struct ContentView: View {
             }
             .sheet(isPresented: $showingSync) {
                 SyncSettingsView()
+            }
+            .sheet(isPresented: $showingHelp) {
+                HelpGuideView()
             }
             .overlay(alignment: .bottom) {
                 StatusBanner(
@@ -70,6 +86,16 @@ struct ContentView: View {
                 isRefreshing: model.isRefreshing
             )
             .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 14, trailing: 16))
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
+
+            QuickActionsCard(
+                isRefreshing: model.isRefreshing,
+                refresh: { Task { await model.refreshAll() } },
+                add: { editingProfile = Profile() },
+                sync: { showingSync = true }
+            )
+            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 10, trailing: 16))
             .listRowSeparator(.hidden)
             .listRowBackground(Color.clear)
 
@@ -109,24 +135,32 @@ struct ContentView: View {
                         )
                     }
                     .buttonStyle(.plain)
+                    .accessibilityHint("打开 \(profile.name) 的套餐配置")
+                    .accessibilityAction(named: "删除 \(profile.name)") {
+                        delete(profile)
+                    }
                     .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                         Button(role: .destructive) {
-                            guard let index = model.profiles.firstIndex(where: { $0.id == profile.id }) else { return }
-                            Task { await model.delete(at: IndexSet(integer: index)) }
+                            delete(profile)
                         } label: {
                             Label("删除", systemImage: "trash")
                         }
                     }
                 }
             } header: {
-                HStack {
-                    Text("我的套餐")
-                    Spacer()
-                    Text("\(model.profiles.count) 个")
-                        .font(.caption.weight(.semibold))
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack {
+                        Text("我的套餐")
+                        Spacer()
+                        Text("\(model.profiles.count) 个")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    Text("点击套餐可修改配置；下拉页面可刷新全部用量")
+                        .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
                 .textCase(nil)
@@ -135,6 +169,47 @@ struct ContentView: View {
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .refreshable { await model.refreshAll() }
+    }
+
+    private func delete(_ profile: Profile) {
+        guard let index = model.profiles.firstIndex(where: { $0.id == profile.id }) else { return }
+        Task { await model.delete(at: IndexSet(integer: index)) }
+    }
+}
+
+private struct QuickActionsCard: View {
+    let isRefreshing: Bool
+    let refresh: () -> Void
+    let add: () -> Void
+    let sync: () -> Void
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) { actions }
+            VStack(spacing: 8) { actions }
+        }
+        .padding(10)
+        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    @ViewBuilder
+    private var actions: some View {
+        actionButton("刷新用量", icon: "arrow.clockwise", action: refresh)
+            .disabled(isRefreshing)
+            .accessibilityHint("立即查询所有已启用套餐")
+        actionButton("添加套餐", icon: "plus.circle.fill", action: add)
+            .accessibilityHint("添加一个新的套餐账号")
+        actionButton("同步设置", icon: "icloud.fill", action: sync)
+            .accessibilityHint("打开云同步、小组件和灵动岛设置")
+    }
+
+    private func actionButton(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: icon)
+                .font(.caption.weight(.semibold))
+                .frame(maxWidth: .infinity, minHeight: 44)
+        }
+        .buttonStyle(.bordered)
     }
 }
 
@@ -447,31 +522,49 @@ private struct ProviderVisual {
 
 private struct EmptyPlansView: View {
     let add: () -> Void
+    let sync: () -> Void
 
     var body: some View {
-        VStack(spacing: 18) {
-            ZStack {
-                Circle().fill(Color.indigo.opacity(0.10))
-                Image(systemName: "chart.bar.xaxis")
-                    .font(.system(size: 38, weight: .semibold))
-                    .foregroundStyle(.indigo)
+        ScrollView {
+            VStack(spacing: 18) {
+                ZStack {
+                    Circle().fill(Color.indigo.opacity(0.10))
+                    Image(systemName: "chart.bar.xaxis")
+                        .font(.system(size: 38, weight: .semibold))
+                        .foregroundStyle(.indigo)
+                }
+                .frame(width: 92, height: 92)
+                .accessibilityHidden(true)
+
+                Text("欢迎使用 TokenPlan")
+                    .font(.title2.bold())
+                Text("第一次使用只需要完成下面三步。")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+
+                VStack(alignment: .leading, spacing: 16) {
+                    BeginnerStepCard(number: 1, title: "添加套餐", detail: "选择 AI 平台并填写访问凭据。", systemImage: "plus.circle.fill")
+                    BeginnerStepCard(number: 2, title: "刷新用量", detail: "保存后回到首页，应用会自动查询套餐。", systemImage: "arrow.clockwise.circle.fill")
+                    BeginnerStepCard(number: 3, title: "按需开启同步", detail: "有多台设备时，再设置云同步和小组件。", systemImage: "icloud.fill")
+                }
+                .padding(18)
+                .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+
+                Button(action: add) {
+                    FullWidthActionLabel(title: "添加第一个套餐", systemImage: "plus")
+                        .font(.headline)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.indigo)
+
+                Button(action: sync) {
+                    Label("我已有云端配置，去下载", systemImage: "icloud.and.arrow.down")
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .buttonStyle(.bordered)
             }
-            .frame(width: 92, height: 92)
-            Text("还没有套餐").font(.title2.bold())
-            Text("从云端下载配置，或添加第一个 AI 套餐。")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-            Button(action: add) {
-                Label("添加套餐", systemImage: "plus")
-                    .font(.headline)
-                    .frame(maxWidth: 220)
-                    .padding(.vertical, 12)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(.indigo)
+            .padding(24)
         }
-        .padding(30)
     }
 }
 

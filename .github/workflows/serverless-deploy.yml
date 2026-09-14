@@ -1,0 +1,66 @@
+name: Deploy TokenPlan Serverless provider
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: Provider to deploy
+        required: true
+        type: choice
+        options:
+          - aliyun
+          - tencent
+      deploy:
+        description: Type DEPLOY to confirm deployment (cloud charges may apply)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    if: ${{ inputs.deploy == 'DEPLOY' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      VOLCENGINE_CODING_PLAN_API_KEY: ${{ secrets.VOLCENGINE_CODING_PLAN_API_KEY }}
+      VOLCENGINE_CODING_PLAN_MODEL: ${{ vars.VOLCENGINE_CODING_PLAN_MODEL || 'ark-code-latest' }}
+      DINGTALK_WEBHOOK: ${{ secrets.DINGTALK_WEBHOOK }}
+      WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
+      NOTIFY_ON_SUCCESS: ${{ vars.NOTIFY_ON_SUCCESS || 'true' }}
+      NOTIFY_ON_FAILURE: ${{ vars.NOTIFY_ON_FAILURE || 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+      - name: Validate Volcengine secret
+        shell: bash
+        run: test -n "$VOLCENGINE_CODING_PLAN_API_KEY"
+      - name: Deploy Alibaba FC
+        if: ${{ inputs.provider == 'aliyun' }}
+        working-directory: serverless/aliyun-fc
+        env:
+          ALIYUN_FC_REGION: ${{ vars.ALIYUN_FC_REGION || 'cn-shanghai' }}
+          ALIYUN_CREDENTIALS_FILE: ${{ runner.temp }}/aliyun_credentials
+          ALIYUN_ACCESS_KEY_ID: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
+          ALIYUN_ACCESS_KEY_SECRET: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
+          ALIYUN_ACCOUNT_ID: ${{ secrets.ALIYUN_ACCOUNT_ID }}
+        run: |
+          test -n "$ALIYUN_ACCESS_KEY_ID" && test -n "$ALIYUN_ACCESS_KEY_SECRET" && test -n "$ALIYUN_ACCOUNT_ID"
+          printf '[default]\naliyun_access_key_id = %s\naliyun_access_key_secret = %s\naliyun_account_id = %s\n' "$ALIYUN_ACCESS_KEY_ID" "$ALIYUN_ACCESS_KEY_SECRET" "$ALIYUN_ACCOUNT_ID" > "$ALIYUN_CREDENTIALS_FILE"
+          npm install
+          npx serverless deploy
+      - name: Deploy Tencent SCF
+        if: ${{ inputs.provider == 'tencent' }}
+        working-directory: serverless/tencent-scf
+        env:
+          TENCENT_SECRET_ID: ${{ secrets.TENCENT_SECRET_ID }}
+          TENCENT_SECRET_KEY: ${{ secrets.TENCENT_SECRET_KEY }}
+          TENCENT_APP_ID: ${{ secrets.TENCENT_APP_ID }}
+          TENCENT_REGION: ${{ vars.TENCENT_REGION || 'ap-shanghai' }}
+        run: |
+          test -n "$TENCENT_SECRET_ID" && test -n "$TENCENT_SECRET_KEY" && test -n "$TENCENT_APP_ID"
+          npm install
+          npx serverless deploy

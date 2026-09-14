@@ -1,0 +1,12 @@
+{
+  "name": "tokenplan-aliyun-fc",
+  "private": true,
+  "version": "1.0.0",
+  "description": "TokenPlan prewarm function for Alibaba Cloud Function Compute",
+  "main": "index.js",
+  "license": "MIT",
+  "devDependencies": {
+    "serverless": "^1.83.3",
+    "serverless-aliyun-function-compute": "^1.2.6"
+  }
+}

@@ -1,0 +1,29 @@
+service: tokenplan-tencent-scf
+
+provider:
+  name: tencent
+  runtime: Nodejs18.15
+  region: ${env:TENCENT_REGION, 'ap-shanghai'}
+  environment:
+    TZ: Asia/Shanghai
+    VOLCENGINE_CODING_PLAN_API_KEY: ${env:VOLCENGINE_CODING_PLAN_API_KEY}
+    VOLCENGINE_CODING_PLAN_MODEL: ${env:VOLCENGINE_CODING_PLAN_MODEL, 'ark-code-latest'}
+    DINGTALK_WEBHOOK: ${env:DINGTALK_WEBHOOK, ''}
+    WECOM_WEBHOOK: ${env:WECOM_WEBHOOK, ''}
+    NOTIFY_ON_SUCCESS: ${env:NOTIFY_ON_SUCCESS, 'true'}
+    NOTIFY_ON_FAILURE: ${env:NOTIFY_ON_FAILURE, 'true'}
+
+plugins:
+  - serverless-tencent-scf
+
+package:
+  exclude:
+    - .git/**
+    - node_modules/**
+    - package-lock.json
+
+functions:
+  prewarm:
+    handler: index.prewarm
+    memorySize: 128
+    timeout: 60

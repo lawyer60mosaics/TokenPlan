@@ -1,0 +1,12 @@
+{
+  "name": "tokenplan-tencent-scf",
+  "private": true,
+  "version": "1.0.0",
+  "description": "TokenPlan prewarm function for Tencent Cloud SCF",
+  "main": "index.js",
+  "license": "MIT",
+  "devDependencies": {
+    "serverless": "^1.83.3",
+    "serverless-tencent-scf": "^0.1.36"
+  }
+}
