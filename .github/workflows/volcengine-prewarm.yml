@@ -2,9 +2,10 @@ name: Volcengine Coding Plan Prewarm
 
 on:
   schedule:
-    # GitHub cron uses UTC. Asia/Shanghai is UTC+8 year-round.
-    - cron: "0 0 * * 1-5"
-    - cron: "0 5 * * 1-5"
+    - cron: "0 8 * * 1-5"
+      timezone: "Asia/Shanghai"
+    - cron: "0 13 * * 1-5"
+      timezone: "Asia/Shanghai"
   workflow_dispatch:
 
 permissions:
